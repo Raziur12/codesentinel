@@ -1,0 +1,13 @@
+{
+  "name": "test-react-node-mongo",
+  "version": "1.0.0",
+  "dependencies": {
+    "@mui/material": "^7.0.0",
+    "express": "^5.0.0",
+    "mongoose": "^8.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^7.0.0"
+  }
+}
