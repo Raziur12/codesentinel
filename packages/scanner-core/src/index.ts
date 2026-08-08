@@ -46,9 +46,22 @@ export interface ScannerPlugin {
   ): Promise<DetectionResult[]>;
 }
 
+export interface ProjectStructure {
+  rootFiles: string[];
+  directories: string[];
+  frontend: boolean;
+  backend: boolean;
+  tests: boolean;
+  configuration: string[];
+  packageFiles: string[];
+  infrastructure: string[];
+}
+
 export interface ScanResult {
   projectPath: string;
   filesScanned: number;
+
+  projectStructure: ProjectStructure;
 
   technologies: DetectionResult[];
 

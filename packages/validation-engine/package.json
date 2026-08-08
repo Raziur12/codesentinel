@@ -1,0 +1,19 @@
+{
+  "name": "@codesentinel/validation-engine",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@codesentinel/scanner-core": "0.0.1",
+    "@codesentinel/project-analyzer": "0.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.2"
+  }
+}

@@ -1,6 +1,11 @@
 {
   "name": "test-react-node-mongo",
   "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"Tests passed\"",
+    "lint": "echo \"Lint passed\""
+  },
   "dependencies": {
     "@mui/material": "^7.0.0",
     "express": "^5.0.0",
