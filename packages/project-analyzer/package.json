@@ -1,0 +1,17 @@
+{
+  "name": "@codesentinel/project-analyzer",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@codesentinel/scanner-core": "0.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}

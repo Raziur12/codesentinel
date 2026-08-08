@@ -9,6 +9,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@codesentinel/project-analyzer": "0.0.1",
     "@codesentinel/scanner-core": "0.0.1",
     "@codesentinel/technology-detectors": "0.0.1"
   },

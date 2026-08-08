@@ -2,6 +2,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import {
+  analyzeProject
+} from "@codesentinel/project-analyzer";
+
+import {
   deduplicateDetections,
   createTechnologyProfile
 } from "@codesentinel/scanner-core";
@@ -84,6 +88,9 @@ async function scanProject(
     files
   };
 
+  const projectStructure =
+    await analyzeProject(projectPath);
+
   /*
    * Run every detector exactly once.
    */
@@ -150,6 +157,7 @@ async function scanProject(
   return {
     projectPath,
     filesScanned: files.length,
+    projectStructure,
     technologies,
     technologyProfile,
     startedAt,
