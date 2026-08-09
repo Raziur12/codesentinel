@@ -42,6 +42,14 @@ export interface ValidationFinding {
   exitCode: number | null;
 
   evidence?: string;
+
+  file?: string;
+
+  line?: number;
+
+  column?: number;
+
+  code?: string;
 }
 
 export interface ValidationResult {
@@ -78,7 +86,7 @@ export interface ValidationReport {
   completedAt: string;
 }
 
-/*
+/**
  * Convert command + arguments into
  * a human-readable command string.
  *
@@ -100,7 +108,7 @@ function getCommandText(
   ].join(" ");
 }
 
-/*
+/**
  * Detect the validation category
  * from the command name.
  */
@@ -140,7 +148,7 @@ function getValidationCategory(
   return "configuration";
 }
 
-/*
+/**
  * Decide severity based on
  * validation category.
  */
@@ -171,7 +179,56 @@ function getValidationSeverity(
   }
 }
 
-/*
+/**
+ * Parsed TypeScript compiler error.
+ *
+ * Example input:
+ *
+ * app.ts(1,7): error TS2322:
+ * Type 'number' is not assignable to type 'string'.
+ *
+ * Result:
+ *
+ * {
+ *   file: "app.ts",
+ *   line: 1,
+ *   column: 7,
+ *   code: "TS2322",
+ *   message: "Type 'number' is not assignable to type 'string'."
+ * }
+ */
+interface ParsedTypeScriptError {
+  file: string;
+  line: number;
+  column: number;
+  code: string;
+  message: string;
+}
+
+/**
+ * Parse a TypeScript compiler error.
+ */
+function parseTypeScriptError(
+  output: string
+): ParsedTypeScriptError | null {
+  const match = output.match(
+    /(?:^|\r?\n)(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+?)(?:\r?\n|$)/
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    file: match[1].trim(),
+    line: Number(match[2]),
+    column: Number(match[3]),
+    code: match[4],
+    message: match[5].trim()
+  };
+}
+
+/**
  * Create a structured finding
  * whenever a validation command fails.
  */
@@ -196,7 +253,7 @@ function createFailureFinding(
       category
     );
 
-  /*
+  /**
    * Prefer stderr because compiler,
    * lint and runtime errors usually
    * appear there.
@@ -208,6 +265,66 @@ function createFailureFinding(
     stdout.trim() ||
     "Command failed without output.";
 
+  /**
+   * Try to parse TypeScript error.
+   */
+  const parsedTypeScriptError =
+    parseTypeScriptError(output);
+
+  /**
+   * If this is a build or type-check
+   * validation and TypeScript produced
+   * a structured error, return the
+   * detailed TypeScript finding.
+   */
+  if (
+    category === "build" ||
+    category === "type-check"
+  ) {
+    const firstError =
+      parsedTypeScriptError;
+
+    if (firstError) {
+      return {
+        type: "validation",
+
+        severity,
+
+        category,
+
+        title: "TypeScript error",
+
+        message:
+          firstError.message,
+
+        command,
+
+        exitCode,
+
+        evidence:
+          `${firstError.file}(${firstError.line},${firstError.column}) [${firstError.code}]`,
+
+        file:
+          firstError.file,
+
+        line:
+          firstError.line,
+
+        column:
+          firstError.column,
+
+        code:
+          firstError.code
+      };
+    }
+  }
+
+  /**
+   * Generic validation finding.
+   *
+   * If TypeScript parsing succeeded,
+   * still expose its structured fields.
+   */
   return {
     type: "validation",
 
@@ -215,21 +332,37 @@ function createFailureFinding(
 
     category,
 
-    title:
-      `${validationCommand.name} failed`,
+    title: parsedTypeScriptError
+      ? "TypeScript error"
+      : `${validationCommand.name} failed`,
 
-    message:
-      `The ${validationCommand.name.toLowerCase()} command failed.`,
+    message: parsedTypeScriptError
+      ? parsedTypeScriptError.message
+      : `The ${validationCommand.name.toLowerCase()} command failed.`,
 
     command,
 
     exitCode,
 
-    evidence: output
+    evidence: parsedTypeScriptError
+      ? `${parsedTypeScriptError.file}(${parsedTypeScriptError.line},${parsedTypeScriptError.column}) [${parsedTypeScriptError.code}]`
+      : output,
+
+    file:
+      parsedTypeScriptError?.file,
+
+    line:
+      parsedTypeScriptError?.line,
+
+    column:
+      parsedTypeScriptError?.column,
+
+    code:
+      parsedTypeScriptError?.code
   };
 }
 
-/*
+/**
  * Create a skipped validation result.
  *
  * We use:
@@ -263,7 +396,7 @@ function createSkippedResult(
   };
 }
 
-/*
+/**
  * Execute one validation command.
  */
 function runCommand(
@@ -278,7 +411,7 @@ function runCommand(
       const isWindows =
         process.platform === "win32";
 
-      /*
+      /**
        * On Windows npm is executed
        * through npm.cmd.
        */
@@ -291,7 +424,7 @@ function runCommand(
         `Executable: ${executable}`
       );
 
-      /*
+      /**
        * shell:true is important for
        * Windows/Git Bash compatibility.
        */
@@ -317,7 +450,7 @@ function runCommand(
 
       let stderr = "";
 
-      /*
+      /**
        * Capture stdout.
        */
       child.stdout?.on(
@@ -328,7 +461,7 @@ function runCommand(
         }
       );
 
-      /*
+      /**
        * Capture stderr.
        */
       child.stderr?.on(
@@ -339,7 +472,7 @@ function runCommand(
         }
       );
 
-      /*
+      /**
        * Command completed.
        */
       child.on(
@@ -352,27 +485,27 @@ function runCommand(
 
           const result:
             ValidationResult = {
-            name:
-              validationCommand.name,
+              name:
+                validationCommand.name,
 
-            command:
-              getCommandText(
-                validationCommand
-              ),
+              command:
+                getCommandText(
+                  validationCommand
+                ),
 
-            status,
+              status,
 
-            exitCode,
+              exitCode,
 
-            stdout,
+              stdout,
 
-            stderr,
+              stderr,
 
-            durationMs:
-              Date.now() - started
-          };
+              durationMs:
+                Date.now() - started
+            };
 
-          /*
+          /**
            * If command failed,
            * attach a structured finding.
            */
@@ -392,7 +525,7 @@ function runCommand(
         }
       );
 
-      /*
+      /**
        * Process could not start.
        *
        * Example:
@@ -411,26 +544,26 @@ function runCommand(
 
           const result:
             ValidationResult = {
-            name:
-              validationCommand.name,
+              name:
+                validationCommand.name,
 
-            command:
-              getCommandText(
-                validationCommand
-              ),
+              command:
+                getCommandText(
+                  validationCommand
+                ),
 
-            status: "failed",
+              status: "failed",
 
-            exitCode: null,
+              exitCode: null,
 
-            stdout,
+              stdout,
 
-            stderr:
-              errorOutput,
+              stderr:
+                errorOutput,
 
-            durationMs:
-              Date.now() - started
-          };
+              durationMs:
+                Date.now() - started
+            };
 
           result.finding =
             createFailureFinding(
@@ -447,7 +580,7 @@ function runCommand(
   );
 }
 
-/*
+/**
  * Run all validations for a project.
  */
 export async function validateProject(
@@ -461,14 +594,14 @@ export async function validateProject(
   const results:
     ValidationResult[] = [];
 
-  /*
+  /**
    * Findings are collected
    * from failed validations.
    */
   const findings:
     ValidationFinding[] = [];
 
-  /*
+  /**
    * Run commands one by one.
    *
    * This is intentional.
@@ -476,11 +609,17 @@ export async function validateProject(
    * Example:
    *
    * npm install
+   *
    *      ↓
+   *
    * npm run build
+   *
    *      ↓
+   *
    * npm test
+   *
    *      ↓
+   *
    * npm run lint
    */
   for (
@@ -492,7 +631,7 @@ export async function validateProject(
       } ${command.args.join(" ")}`
     );
 
-    /*
+    /**
      * Special command:
      *
      * __skip__
@@ -518,7 +657,7 @@ export async function validateProject(
       continue;
     }
 
-    /*
+    /**
      * Execute actual command.
      */
     const result =
@@ -527,12 +666,12 @@ export async function validateProject(
         command
       );
 
-    /*
+    /**
      * Save result.
      */
     results.push(result);
 
-    /*
+    /**
      * Successful validation.
      */
     if (
@@ -544,7 +683,7 @@ export async function validateProject(
       );
     }
 
-    /*
+    /**
      * Failed validation.
      */
     else {
@@ -552,7 +691,7 @@ export async function validateProject(
         `❌ ${command.name}`
       );
 
-      /*
+      /**
        * If a finding was generated,
        * save it in the report.
        */
@@ -590,7 +729,7 @@ export async function validateProject(
         );
       }
 
-      /*
+      /**
        * Print stderr.
        */
       if (
@@ -607,7 +746,7 @@ export async function validateProject(
         );
       }
 
-      /*
+      /**
        * Print stdout.
        */
       if (
@@ -629,7 +768,7 @@ export async function validateProject(
   const completedAt =
     new Date().toISOString();
 
-  /*
+  /**
    * Project is valid when
    * every validation either
    *

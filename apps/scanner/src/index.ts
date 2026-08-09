@@ -170,6 +170,16 @@ async function scanProject(
           name: "Lint",
           command: "npm",
           args: ["run", "lint"]
+        },
+        {
+          name: "Type Check",
+          command: "npx",
+          args: [
+            "tsc",
+            "--noEmit",
+            "-p",
+            "tsconfig.json"
+          ]
         }
       ],
       "npm"

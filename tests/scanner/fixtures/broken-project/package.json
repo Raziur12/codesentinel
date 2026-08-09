@@ -1,0 +1,13 @@
+{
+  "name": "broken-project",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"Tests passed\"",
+    "lint": "echo \"Lint passed\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}
