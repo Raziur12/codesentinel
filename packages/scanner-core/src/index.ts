@@ -57,6 +57,39 @@ export interface ProjectStructure {
   infrastructure: string[];
 }
 
+
+export interface ValidationSummary {
+  passed: boolean;
+  total: number;
+  passedCount: number;
+  failedCount: number;
+  skippedCount: number;
+}
+
+export type FindingSeverity =
+  | "error"
+  | "warning"
+  | "info";
+
+export type FindingCategory =
+  | "build"
+  | "test"
+  | "lint"
+  | "type-check"
+  | "dependency"
+  | "configuration"
+  | "technology"
+  | "security";
+
+export interface ScannerFinding {
+  severity: FindingSeverity;
+  category: FindingCategory;
+  title: string;
+  message: string;
+  command?: string;
+  evidence?: string;
+}
+
 export interface ScanResult {
   projectPath: string;
   filesScanned: number;
@@ -66,6 +99,8 @@ export interface ScanResult {
   technologies: DetectionResult[];
 
   technologyProfile: TechnologyProfile;
+
+  validation?: ValidationSummary;
 
   startedAt: string;
   completedAt: string;

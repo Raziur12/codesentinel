@@ -2,6 +2,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import {
+  validateProject
+} from "@codesentinel/validation-engine";
+
+import {
   analyzeProject
 } from "@codesentinel/project-analyzer";
 
@@ -24,13 +28,17 @@ import {
   resolveProjectPath
 } from "./path-resolver.js";
 
+
 async function getFiles(
   directory: string,
   root = directory
 ): Promise<string[]> {
-  const entries = await fs.readdir(directory, {
-    withFileTypes: true
-  });
+  const entries = await fs.readdir(
+    directory,
+    {
+      withFileTypes: true
+    }
+  );
 
   const files: string[] = [];
 
@@ -73,6 +81,7 @@ async function getFiles(
   return files;
 }
 
+
 async function scanProject(
   projectPath: string,
   plugins: ScannerPlugin[]
@@ -80,6 +89,9 @@ async function scanProject(
   const startedAt =
     new Date().toISOString();
 
+  /*
+   * 1. Collect project files
+   */
   const files =
     await getFiles(projectPath);
 
@@ -88,11 +100,18 @@ async function scanProject(
     files
   };
 
-  const projectStructure =
-    await analyzeProject(projectPath);
 
   /*
-   * Run every detector exactly once.
+   * 2. Analyze project structure
+   */
+  const projectStructure =
+    await analyzeProject(
+      projectPath
+    );
+
+
+  /*
+   * 3. Run every detector exactly once
    */
   const rawTechnologies = [];
 
@@ -105,25 +124,60 @@ async function scanProject(
     );
   }
 
+
   /*
-   * Remove duplicate technologies
-   * and merge their evidence.
+   * 4. Remove duplicate technologies
+   *    and merge their evidence.
    */
   const technologies =
     deduplicateDetections(
       rawTechnologies
     );
 
+
   /*
-   * Create structured technology profile.
+   * 5. Create structured technology profile
    */
   const technologyProfile =
     createTechnologyProfile(
       technologies
     );
 
+
   /*
-   * Save CodeSentinel artifact.
+   * 6. Run project validation
+   */
+  const validationReport =
+    await validateProject(
+      projectPath,
+      [
+        {
+          name: "Install dependencies",
+          command: "npm",
+          args: ["install"]
+        },
+        {
+          name: "Build",
+          command: "npm",
+          args: ["run", "build"]
+        },
+        {
+          name: "Test",
+          command: "npm",
+          args: ["test"]
+        },
+        {
+          name: "Lint",
+          command: "npm",
+          args: ["run", "lint"]
+        }
+      ],
+      "npm"
+    );
+
+
+  /*
+   * 7. Save CodeSentinel artifacts
    */
   const outputDirectory =
     path.join(
@@ -138,6 +192,10 @@ async function scanProject(
     }
   );
 
+
+  /*
+   * Save technology profile
+   */
   await fs.writeFile(
     path.join(
       outputDirectory,
@@ -151,8 +209,30 @@ async function scanProject(
     "utf8"
   );
 
+
+  /*
+   * Save validation report
+   */
+  await fs.writeFile(
+    path.join(
+      outputDirectory,
+      "validation-report.json"
+    ),
+    JSON.stringify(
+      validationReport,
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+
+  /*
+   * 8. Create final scan result
+   */
   const completedAt =
     new Date().toISOString();
+
 
   return {
     projectPath,
@@ -160,14 +240,43 @@ async function scanProject(
     projectStructure,
     technologies,
     technologyProfile,
+
+    validation: {
+      passed:
+        validationReport.passed,
+
+      total:
+        validationReport.results.length,
+
+      passedCount:
+        validationReport.results.filter(
+          result =>
+            result.status === "passed"
+        ).length,
+
+      failedCount:
+        validationReport.results.filter(
+          result =>
+            result.status === "failed"
+        ).length,
+
+      skippedCount:
+        validationReport.results.filter(
+          result =>
+            result.status === "skipped"
+        ).length
+    },
+
     startedAt,
     completedAt
   };
 }
 
+
 async function main(): Promise<void> {
   const inputPath =
     process.argv[2] ?? ".";
+
 
   /*
    * IMPORTANT:
@@ -178,6 +287,7 @@ async function main(): Promise<void> {
     await resolveProjectPath(
       inputPath
     );
+
 
   console.log(
     "🔎 CodeSentinel Scanner"
@@ -197,6 +307,7 @@ async function main(): Promise<void> {
 
   console.log("");
 
+
   const result =
     await scanProject(
       projectPath,
@@ -204,6 +315,7 @@ async function main(): Promise<void> {
         universalTechnologyPlugin
       ]
     );
+
 
   console.log(
     JSON.stringify(
@@ -214,12 +326,15 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((error) => {
-  console.error(
-    "Scanner failed:"
-  );
 
-  console.error(error);
+main().catch(
+  (error) => {
+    console.error(
+      "Scanner failed:"
+    );
 
-  process.exit(1);
-});
+    console.error(error);
+
+    process.exit(1);
+  }
+);
