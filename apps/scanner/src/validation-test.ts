@@ -6,7 +6,8 @@ import {
   resolveProjectPath
 } from "./path-resolver.js";
 
-const inputPath = process.argv[2];
+const inputPath =
+  process.argv[2];
 
 if (!inputPath) {
   console.error(
@@ -17,7 +18,9 @@ if (!inputPath) {
 }
 
 const projectPath =
-  await resolveProjectPath(inputPath);
+  await resolveProjectPath(
+    inputPath
+  );
 
 console.log("");
 
@@ -39,37 +42,57 @@ console.log(
 
 console.log("");
 
-/*
+/**
  * Validation commands
  */
 const commands = [
   {
     name: "Install dependencies",
+
     command: "npm",
-    args: ["install"]
+
+    args: [
+      "install"
+    ]
   },
 
   {
     name: "Build",
+
     command: "npm",
-    args: ["run", "build"]
+
+    args: [
+      "run",
+      "build"
+    ]
   },
 
   {
     name: "Test",
+
     command: "npm",
-    args: ["test"]
+
+    args: [
+      "test"
+    ]
   },
 
   {
     name: "Lint",
+
     command: "npm",
-    args: ["run", "lint"]
+
+    args: [
+      "run",
+      "lint"
+    ]
   },
 
   {
     name: "Type Check",
+
     command: "npx",
+
     args: [
       "tsc",
       "--noEmit",
@@ -88,6 +111,9 @@ const report =
 
 console.log("");
 
+/**
+ * Validation Report
+ */
 console.log(
   "📊 Validation Report"
 );
@@ -119,29 +145,37 @@ const skipped =
       result.status === "skipped"
   ).length;
 
+const warnings =
+  report.warnings.length;
+
 console.log(
-  `Total:   ${total}`
+  `Total:    ${total}`
 );
 
 console.log(
-  `Passed:  ${passed}`
+  `Passed:   ${passed}`
 );
 
 console.log(
-  `Failed:  ${failed}`
+  `Failed:   ${failed}`
 );
 
 console.log(
-  `Skipped: ${skipped}`
+  `Skipped:  ${skipped}`
+);
+
+console.log(
+  `Warnings: ${warnings}`
 );
 
 console.log("");
 
-/*
- * Findings
+/**
+ * Validation Findings
  */
-if (report.findings.length > 0) {
-
+if (
+  report.findings.length > 0
+) {
   console.log(
     "🚨 Validation Findings"
   );
@@ -156,7 +190,6 @@ if (report.findings.length > 0) {
     const finding
     of report.findings
   ) {
-
     console.log(
       `🔴 ${finding.severity.toUpperCase()}`
     );
@@ -165,18 +198,56 @@ if (report.findings.length > 0) {
       finding.title
     );
 
-    if (finding.command) {
+    if (
+      finding.command
+    ) {
       console.log(
         `Command: ${finding.command}`
       );
     }
 
     if (
-      finding.exitCode !== undefined &&
-      finding.exitCode !== null
+      finding.exitCode !==
+        undefined &&
+      finding.exitCode !==
+        null
     ) {
       console.log(
         `Exit Code: ${finding.exitCode}`
+      );
+    }
+
+    if (
+      finding.file
+    ) {
+      console.log(
+        `File: ${finding.file}`
+      );
+    }
+
+    if (
+      finding.line !==
+        undefined
+    ) {
+      console.log(
+        `Line: ${finding.line}`
+      );
+    }
+
+    if (
+      finding.column !==
+        undefined
+    ) {
+      console.log(
+        `Column: ${finding.column}`
+      );
+    }
+
+    if (
+      finding.code
+    ) {
+      console.log(
+        `Code: ${finding.code}`
       );
     }
 
@@ -184,10 +255,107 @@ if (report.findings.length > 0) {
       finding.message
     );
 
+    if (
+      finding.evidence
+    ) {
+      console.log(
+        `Evidence: ${finding.evidence}`
+      );
+    }
+
     console.log("");
   }
 }
 
+/**
+ * Validation Warnings
+ */
+if (
+  report.warnings.length > 0
+) {
+  console.log(
+    "⚠️ Validation Warnings"
+  );
+
+  console.log(
+    "======================"
+  );
+
+  console.log("");
+
+  for (
+    const warning
+    of report.warnings
+  ) {
+    console.log(
+      `🟡 ${warning.severity.toUpperCase()}`
+    );
+
+    console.log(
+      warning.title
+    );
+
+    if (
+      warning.command
+    ) {
+      console.log(
+        `Command: ${warning.command}`
+      );
+    }
+
+    if (
+      warning.code
+    ) {
+      console.log(
+        `Code: ${warning.code}`
+      );
+    }
+
+    if (
+      warning.file
+    ) {
+      console.log(
+        `File: ${warning.file}`
+      );
+    }
+
+    if (
+      warning.line !==
+        undefined
+    ) {
+      console.log(
+        `Line: ${warning.line}`
+      );
+    }
+
+    if (
+      warning.column !==
+        undefined
+    ) {
+      console.log(
+        `Column: ${warning.column}`
+      );
+    }
+
+    console.log(
+      warning.message
+    );
+
+    if (
+      warning.evidence
+    ) {
+      console.log(
+        `Evidence: ${warning.evidence}`
+      );
+    }
+
+    console.log("");
+  }
+}
+
+/**
+ * Final project status
+ */
 console.log(
   report.passed
     ? "🎯 Project Status: VALID"
@@ -196,6 +364,9 @@ console.log(
 
 console.log("");
 
+/**
+ * Full JSON report
+ */
 console.log(
   JSON.stringify(
     report,

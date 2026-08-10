@@ -68,6 +68,8 @@ export interface ValidationResult {
   durationMs: number;
 
   finding?: ValidationFinding;
+
+  warnings?: ValidationFinding[];
 }
 
 export interface ValidationReport {
@@ -79,11 +81,55 @@ export interface ValidationReport {
 
   findings: ValidationFinding[];
 
+  warnings: ValidationFinding[];
+
   passed: boolean;
 
   startedAt: string;
 
   completedAt: string;
+}
+
+/**
+ * Parsed TypeScript compiler error.
+ *
+ * Example:
+ *
+ * app.ts(1,7): error TS2322:
+ * Type 'number' is not assignable to type 'string'.
+ */
+interface ParsedTypeScriptError {
+  file: string;
+  line: number;
+  column: number;
+  code: string;
+  message: string;
+}
+
+/**
+ * Parsed warning coming from the
+ * package manager / runtime / engine.
+ *
+ * Example:
+ *
+ * npm warn EBADENGINE Unsupported engine {
+ *   package: 'vite@7.3.6',
+ *   required: { node: '^20.19.0 || >=22.12.0' },
+ *   current: { node: 'v18.20.8', npm: '10.8.2' }
+ * }
+ */
+interface ParsedEngineWarning {
+  packageName?: string;
+
+  packageVersion?: string;
+
+  requiredNode?: string;
+
+  currentNode?: string;
+
+  currentNpm?: string;
+
+  message: string;
 }
 
 /**
@@ -180,33 +226,12 @@ function getValidationSeverity(
 }
 
 /**
- * Parsed TypeScript compiler error.
+ * Parse TypeScript compiler errors.
  *
- * Example input:
+ * Supports:
  *
  * app.ts(1,7): error TS2322:
  * Type 'number' is not assignable to type 'string'.
- *
- * Result:
- *
- * {
- *   file: "app.ts",
- *   line: 1,
- *   column: 7,
- *   code: "TS2322",
- *   message: "Type 'number' is not assignable to type 'string'."
- * }
- */
-interface ParsedTypeScriptError {
-  file: string;
-  line: number;
-  column: number;
-  code: string;
-  message: string;
-}
-
-/**
- * Parse a TypeScript compiler error.
  */
 function parseTypeScriptError(
   output: string
@@ -221,10 +246,98 @@ function parseTypeScriptError(
 
   return {
     file: match[1].trim(),
+
     line: Number(match[2]),
+
     column: Number(match[3]),
+
     code: match[4],
+
     message: match[5].trim()
+  };
+}
+
+/**
+ * Parse Node/npm engine warnings.
+ *
+ * Example:
+ *
+ * npm warn EBADENGINE Unsupported engine {
+ * npm warn EBADENGINE   package: 'vite@7.3.6',
+ * npm warn EBADENGINE   required: { node: '^20.19.0 || >=22.12.0' },
+ * npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+ * npm warn EBADENGINE }
+ */
+function parseEngineWarning(
+  output: string
+): ParsedEngineWarning | null {
+  if (
+    !output.includes("EBADENGINE") &&
+    !output.toLowerCase().includes("unsupported engine")
+  ) {
+    return null;
+  }
+
+  const packageMatch =
+    output.match(
+      /package:\s*['"]([^'"]+)['"]/i
+    );
+
+  const requiredNodeMatch =
+    output.match(
+      /required:\s*\{\s*node:\s*['"]([^'"]+)['"]/i
+    );
+
+  const currentNodeMatch =
+    output.match(
+      /current:\s*\{\s*node:\s*['"]([^'"]+)['"],\s*npm:\s*['"]([^'"]+)['"]\s*\}/i
+    );
+
+  const packageNameAndVersion =
+    packageMatch?.[1];
+
+  let packageName:
+    | string
+    | undefined;
+
+  let packageVersion:
+    | string
+    | undefined;
+
+  if (packageNameAndVersion) {
+    const packageParts =
+      packageNameAndVersion.match(
+        /^(.+?)@([^@]+)$/
+      );
+
+    if (packageParts) {
+      packageName =
+        packageParts[1];
+
+      packageVersion =
+        packageParts[2];
+    } else {
+      packageName =
+        packageNameAndVersion;
+    }
+  }
+
+  return {
+    packageName,
+
+    packageVersion,
+
+    requiredNode:
+      requiredNodeMatch?.[1],
+
+    currentNode:
+      currentNodeMatch?.[1],
+
+    currentNpm:
+      currentNodeMatch?.[2],
+
+    message:
+      "Package engine requirement does not match the current Node.js environment."
   };
 }
 
@@ -266,16 +379,16 @@ function createFailureFinding(
     "Command failed without output.";
 
   /**
-   * Try to parse TypeScript error.
+   * First try to detect TypeScript error.
    */
   const parsedTypeScriptError =
-    parseTypeScriptError(output);
+    parseTypeScriptError(
+      output
+    );
 
   /**
-   * If this is a build or type-check
-   * validation and TypeScript produced
-   * a structured error, return the
-   * detailed TypeScript finding.
+   * TypeScript build/type-check
+   * gets a structured finding.
    */
   if (
     category === "build" ||
@@ -320,10 +433,75 @@ function createFailureFinding(
   }
 
   /**
-   * Generic validation finding.
-   *
-   * If TypeScript parsing succeeded,
-   * still expose its structured fields.
+   * Check for Node/npm engine
+   * compatibility warnings.
+   */
+  const parsedEngineWarning =
+    parseEngineWarning(
+      output
+    );
+
+  if (
+    parsedEngineWarning
+  ) {
+    let engineMessage =
+      parsedEngineWarning.message;
+
+    if (
+      parsedEngineWarning.packageName
+    ) {
+      engineMessage +=
+        ` Package: ${parsedEngineWarning.packageName}`;
+
+      if (
+        parsedEngineWarning.packageVersion
+      ) {
+        engineMessage +=
+          `@${parsedEngineWarning.packageVersion}`;
+      }
+    }
+
+    if (
+      parsedEngineWarning.requiredNode
+    ) {
+      engineMessage +=
+        ` requires Node.js ${parsedEngineWarning.requiredNode}.`;
+    }
+
+    if (
+      parsedEngineWarning.currentNode
+    ) {
+      engineMessage +=
+        ` Current Node.js version is ${parsedEngineWarning.currentNode}.`;
+    }
+
+    return {
+      type: "validation",
+
+      severity: "medium",
+
+      category,
+
+      title:
+        "Node.js engine warning",
+
+      message:
+        engineMessage,
+
+      command,
+
+      exitCode,
+
+      evidence:
+        output,
+
+      code:
+        "EBADENGINE"
+    };
+  }
+
+  /**
+   * Generic validation failure.
    */
   return {
     type: "validation",
@@ -332,21 +510,24 @@ function createFailureFinding(
 
     category,
 
-    title: parsedTypeScriptError
-      ? "TypeScript error"
-      : `${validationCommand.name} failed`,
+    title:
+      parsedTypeScriptError
+        ? "TypeScript error"
+        : `${validationCommand.name} failed`,
 
-    message: parsedTypeScriptError
-      ? parsedTypeScriptError.message
-      : `The ${validationCommand.name.toLowerCase()} command failed.`,
+    message:
+      parsedTypeScriptError
+        ? parsedTypeScriptError.message
+        : `The ${validationCommand.name.toLowerCase()} command failed.`,
 
     command,
 
     exitCode,
 
-    evidence: parsedTypeScriptError
-      ? `${parsedTypeScriptError.file}(${parsedTypeScriptError.line},${parsedTypeScriptError.column}) [${parsedTypeScriptError.code}]`
-      : output,
+    evidence:
+      parsedTypeScriptError
+        ? `${parsedTypeScriptError.file}(${parsedTypeScriptError.line},${parsedTypeScriptError.column}) [${parsedTypeScriptError.code}]`
+        : output,
 
     file:
       parsedTypeScriptError?.file,
@@ -399,6 +580,9 @@ function createSkippedResult(
 /**
  * Execute one validation command.
  */
+/**
+ * Execute one validation command.
+ */
 function runCommand(
   projectPath: string,
   validationCommand: ValidationCommand
@@ -428,23 +612,24 @@ function runCommand(
        * shell:true is important for
        * Windows/Git Bash compatibility.
        */
-      const child = spawn(
-        executable,
-        validationCommand.args,
-        {
-          cwd: projectPath,
+      const child =
+        spawn(
+          executable,
+          validationCommand.args,
+          {
+            cwd: projectPath,
 
-          shell: isWindows,
+            shell: isWindows,
 
-          windowsHide: true,
+            windowsHide: true,
 
-          stdio: [
-            "ignore",
-            "pipe",
-            "pipe"
-          ]
-        }
-      );
+            stdio: [
+              "ignore",
+              "pipe",
+              "pipe"
+            ]
+          }
+        );
 
       let stdout = "";
 
@@ -485,25 +670,114 @@ function runCommand(
 
           const result:
             ValidationResult = {
-              name:
-                validationCommand.name,
+            name:
+              validationCommand.name,
+
+            command:
+              getCommandText(
+                validationCommand
+              ),
+
+            status,
+
+            exitCode,
+
+            stdout,
+
+            stderr,
+
+            durationMs:
+              Date.now() - started,
+
+            warnings: []
+          };
+
+          /**
+           * Combine stdout and stderr
+           * because warnings may appear
+           * in either stream.
+           */
+          const combinedOutput =
+            `${stdout}\n${stderr}`;
+
+          /**
+           * Detect Node/npm engine warning
+           * even when the command succeeded.
+           */
+          const parsedEngineWarning =
+            parseEngineWarning(
+              combinedOutput
+            );
+
+          if (
+            parsedEngineWarning
+          ) {
+            let engineMessage =
+              parsedEngineWarning.message;
+
+            if (
+              parsedEngineWarning.packageName
+            ) {
+              engineMessage +=
+                ` Package: ${parsedEngineWarning.packageName}`;
+
+              if (
+                parsedEngineWarning.packageVersion
+              ) {
+                engineMessage +=
+                  `@${parsedEngineWarning.packageVersion}`;
+              }
+            }
+
+            if (
+              parsedEngineWarning.requiredNode
+            ) {
+              engineMessage +=
+                ` Required Node.js: ${parsedEngineWarning.requiredNode}.`;
+            }
+
+            if (
+              parsedEngineWarning.currentNode
+            ) {
+              engineMessage +=
+                ` Current Node.js: ${parsedEngineWarning.currentNode}.`;
+            }
+
+            const warningFinding:
+              ValidationFinding = {
+              type: "validation",
+
+              severity: "medium",
+
+              category:
+                getValidationCategory(
+                  validationCommand.name
+                ),
+
+              title:
+                "Node.js engine warning",
+
+              message:
+                engineMessage,
 
               command:
                 getCommandText(
                   validationCommand
                 ),
 
-              status,
-
               exitCode,
 
-              stdout,
+              evidence:
+                combinedOutput.trim(),
 
-              stderr,
-
-              durationMs:
-                Date.now() - started
+              code:
+                "EBADENGINE"
             };
+
+            result.warnings?.push(
+              warningFinding
+            );
+          }
 
           /**
            * If command failed,
@@ -527,12 +801,6 @@ function runCommand(
 
       /**
        * Process could not start.
-       *
-       * Example:
-       *
-       * npm.cmd not found
-       * command not found
-       * permission problem
        */
       child.on(
         "error",
@@ -544,26 +812,28 @@ function runCommand(
 
           const result:
             ValidationResult = {
-              name:
-                validationCommand.name,
+            name:
+              validationCommand.name,
 
-              command:
-                getCommandText(
-                  validationCommand
-                ),
+            command:
+              getCommandText(
+                validationCommand
+              ),
 
-              status: "failed",
+            status: "failed",
 
-              exitCode: null,
+            exitCode: null,
 
-              stdout,
+            stdout,
 
-              stderr:
-                errorOutput,
+            stderr:
+              errorOutput,
 
-              durationMs:
-                Date.now() - started
-            };
+            durationMs:
+              Date.now() - started,
+
+            warnings: []
+          };
 
           result.finding =
             createFailureFinding(
@@ -601,6 +871,9 @@ export async function validateProject(
   const findings:
     ValidationFinding[] = [];
 
+  const warnings:
+    ValidationFinding[] = [];
+
   /**
    * Run commands one by one.
    *
@@ -609,25 +882,18 @@ export async function validateProject(
    * Example:
    *
    * npm install
-   *
    *      ↓
-   *
    * npm run build
-   *
    *      ↓
-   *
    * npm test
-   *
    *      ↓
-   *
    * npm run lint
    */
   for (
     const command of commands
   ) {
     console.log(
-      `\n▶ Running command: ${
-        command.command
+      `\n▶ Running command: ${command.command
       } ${command.args.join(" ")}`
     );
 
@@ -672,6 +938,19 @@ export async function validateProject(
     results.push(result);
 
     /**
+ * Collect warnings generated by
+ * successful or failed commands.
+ */
+    if (
+      result.warnings &&
+      result.warnings.length > 0
+    ) {
+      warnings.push(
+        ...result.warnings
+      );
+    }
+
+    /**
      * Successful validation.
      */
     if (
@@ -705,28 +984,64 @@ export async function validateProject(
         console.log("");
 
         console.log(
-          `Severity: ${
-            result.finding.severity
+          `Severity: ${result.finding.severity
           }`
         );
 
         console.log(
-          `Category: ${
-            result.finding.category
+          `Category: ${result.finding.category
           }`
         );
 
         console.log(
-          `Finding: ${
-            result.finding.title
+          `Finding: ${result.finding.title
           }`
         );
 
         console.log(
-          `Message: ${
-            result.finding.message
+          `Message: ${result.finding.message
           }`
         );
+
+        /**
+         * Print structured
+         * source information.
+         */
+        if (
+          result.finding.file
+        ) {
+          console.log(
+            `File: ${result.finding.file
+            }`
+          );
+        }
+
+        if (
+          result.finding.line
+        ) {
+          console.log(
+            `Line: ${result.finding.line
+            }`
+          );
+        }
+
+        if (
+          result.finding.column
+        ) {
+          console.log(
+            `Column: ${result.finding.column
+            }`
+          );
+        }
+
+        if (
+          result.finding.code
+        ) {
+          console.log(
+            `Code: ${result.finding.code
+            }`
+          );
+        }
       }
 
       /**
@@ -779,9 +1094,9 @@ export async function validateProject(
     results.every(
       (result) =>
         result.status ===
-          "passed" ||
+        "passed" ||
         result.status ===
-          "skipped"
+        "skipped"
     );
 
   return {
@@ -792,6 +1107,8 @@ export async function validateProject(
     results,
 
     findings,
+
+    warnings,
 
     passed,
 
