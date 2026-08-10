@@ -101,6 +101,10 @@ const commands = [
     ]
   }
 ];
+console.log("\n🔍 Validation Commands:");
+console.log(
+  JSON.stringify(commands, null, 2)
+);
 
 const report =
   await validateProject(
@@ -208,9 +212,9 @@ if (
 
     if (
       finding.exitCode !==
-        undefined &&
+      undefined &&
       finding.exitCode !==
-        null
+      null
     ) {
       console.log(
         `Exit Code: ${finding.exitCode}`
@@ -227,7 +231,7 @@ if (
 
     if (
       finding.line !==
-        undefined
+      undefined
     ) {
       console.log(
         `Line: ${finding.line}`
@@ -236,7 +240,7 @@ if (
 
     if (
       finding.column !==
-        undefined
+      undefined
     ) {
       console.log(
         `Column: ${finding.column}`
@@ -254,6 +258,14 @@ if (
     console.log(
       finding.message
     );
+
+    if (
+      finding.suggestion
+    ) {
+      console.log(
+        `💡 Suggested Fix: ${finding.suggestion}`
+      );
+    }
 
     if (
       finding.evidence
@@ -321,7 +333,7 @@ if (
 
     if (
       warning.line !==
-        undefined
+      undefined
     ) {
       console.log(
         `Line: ${warning.line}`
@@ -330,7 +342,7 @@ if (
 
     if (
       warning.column !==
-        undefined
+      undefined
     ) {
       console.log(
         `Column: ${warning.column}`
