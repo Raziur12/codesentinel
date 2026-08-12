@@ -1,3 +1,7 @@
-const message: string = 123;
+const name: string = 123;
 
-console.log(message);
+const age: number = "twenty";
+
+const user = {};
+
+console.log(user.name);

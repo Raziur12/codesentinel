@@ -1,10 +1,16 @@
 import { spawn } from "node:child_process";
 
+/**
+ * Validation status.
+ */
 export type ValidationStatus =
   | "passed"
   | "failed"
   | "skipped";
 
+/**
+ * Validation severity.
+ */
 export type ValidationSeverity =
   | "info"
   | "low"
@@ -12,6 +18,9 @@ export type ValidationSeverity =
   | "high"
   | "critical";
 
+/**
+ * Validation category.
+ */
 export type ValidationCategory =
   | "build"
   | "test"
@@ -20,12 +29,20 @@ export type ValidationCategory =
   | "dependency"
   | "configuration";
 
+/**
+ * Validation command definition.
+ */
 export interface ValidationCommand {
   name: string;
+
   command: string;
+
   args: string[];
 }
 
+/**
+ * Structured validation finding.
+ */
 export interface ValidationFinding {
   type: "validation";
 
@@ -54,6 +71,11 @@ export interface ValidationFinding {
   suggestion?: string;
 }
 
+/**
+ * Result of one validation command.
+ *
+ * A command can produce multiple findings.
+ */
 export interface ValidationResult {
   name: string;
 
@@ -69,11 +91,14 @@ export interface ValidationResult {
 
   durationMs: number;
 
-  finding?: ValidationFinding;
+  findings?: ValidationFinding[];
 
   warnings?: ValidationFinding[];
 }
 
+/**
+ * Complete validation report.
+ */
 export interface ValidationReport {
   projectPath: string;
 
@@ -102,9 +127,13 @@ export interface ValidationReport {
  */
 interface ParsedTypeScriptError {
   file: string;
+
   line: number;
+
   column: number;
+
   code: string;
+
   message: string;
 }
 
@@ -160,10 +189,9 @@ function createEngineWarningSuggestion(
  *
  * Example:
  *
- * command = "npm"
- * args = ["run", "build"]
+ * npm + ["run", "build"]
  *
- * Result:
+ * becomes:
  *
  * npm run build
  */
@@ -201,15 +229,21 @@ function getValidationCategory(
     return "type-check";
   }
 
-  if (name.includes("build")) {
+  if (
+    name.includes("build")
+  ) {
     return "build";
   }
 
-  if (name.includes("test")) {
+  if (
+    name.includes("test")
+  ) {
     return "test";
   }
 
-  if (name.includes("lint")) {
+  if (
+    name.includes("lint")
+  ) {
     return "lint";
   }
 
@@ -223,7 +257,9 @@ function getValidationCategory(
 function getValidationSeverity(
   category: ValidationCategory
 ): ValidationSeverity {
-  switch (category) {
+  switch (
+    category
+  ) {
     case "dependency":
       return "high";
 
@@ -247,42 +283,41 @@ function getValidationSeverity(
   }
 }
 
-/**
- * Parse TypeScript compiler errors.
- *
- * Supports:
- *
- * app.ts(1,7): error TS2322:
- * Type 'number' is not assignable to type 'string'.
- */
-function parseTypeScriptError(
+function parseTypeScriptErrors(
   output: string
-): ParsedTypeScriptError | null {
-  const match = output.match(
-    /(?:^|\r?\n)(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+?)(?:\r?\n|$)/
-  );
+): ParsedTypeScriptError[] {
+  const errors: ParsedTypeScriptError[] = [];
 
-  if (!match) {
-    return null;
+  const regex =
+    /(?:^|\r?\n)(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+?)(?=\r?\n|$)/g;
+
+  let match: RegExpExecArray | null;
+
+  while (
+    (match = regex.exec(output)) !== null
+  ) {
+    errors.push({
+      file: match[1].trim(),
+
+      line:
+        Number(match[2]),
+
+      column:
+        Number(match[3]),
+
+      code:
+        match[4],
+
+      message:
+        match[5].trim()
+    });
   }
 
-  return {
-    file: match[1].trim(),
-
-    line: Number(match[2]),
-
-    column: Number(match[3]),
-
-    code: match[4],
-
-    message: match[5].trim()
-  };
+  return errors;
 }
 
-/**
- * Create an actionable suggestion
- * for a TypeScript compiler error.
- */
+
+
 function createTypeScriptSuggestion(
   error: ParsedTypeScriptError
 ): string {
@@ -323,17 +358,19 @@ function createTypeScriptSuggestion(
  * Example:
  *
  * npm warn EBADENGINE Unsupported engine {
- * npm warn EBADENGINE   package: 'vite@7.3.6',
- * npm warn EBADENGINE   required: { node: '^20.19.0 || >=22.12.0' },
- * npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
- * npm warn EBADENGINE }
+ *   package: 'vite@7.3.6',
+ *   required: { node: '^20.19.0 || >=22.12.0' },
+ *   current: { node: 'v18.20.8', npm: '10.8.2' }
+ * }
  */
 function parseEngineWarning(
   output: string
 ): ParsedEngineWarning | null {
   if (
     !output.includes("EBADENGINE") &&
-    !output.toLowerCase().includes("unsupported engine")
+    !output
+      .toLowerCase()
+      .includes("unsupported engine")
   ) {
     return null;
   }
@@ -364,13 +401,17 @@ function parseEngineWarning(
     | string
     | undefined;
 
-  if (packageNameAndVersion) {
+  if (
+    packageNameAndVersion
+  ) {
     const packageParts =
       packageNameAndVersion.match(
         /^(.+?)@([^@]+)$/
       );
 
-    if (packageParts) {
+    if (
+      packageParts
+    ) {
       packageName =
         packageParts[1];
 
@@ -402,15 +443,17 @@ function parseEngineWarning(
 }
 
 /**
- * Create a structured finding
+ * Create structured findings
  * whenever a validation command fails.
+ *
+ * One command may produce multiple findings.
  */
-function createFailureFinding(
+function createFailureFindings(
   validationCommand: ValidationCommand,
   exitCode: number | null,
   stdout: string,
   stderr: string
-): ValidationFinding {
+): ValidationFinding[] {
   const command =
     getCommandText(
       validationCommand
@@ -439,62 +482,66 @@ function createFailureFinding(
     "Command failed without output.";
 
   /**
-   * First try to detect TypeScript error.
+   * Parse ALL TypeScript errors.
    */
-  const parsedTypeScriptError =
-    parseTypeScriptError(
+  const parsedTypeScriptErrors =
+    parseTypeScriptErrors(
       output
     );
 
   /**
-   * TypeScript build/type-check
-   * gets a structured finding.
+   * Build/type-check commands
+   * can contain multiple TypeScript errors.
    */
   if (
-    category === "build" ||
-    category === "type-check"
+    (
+      category === "build" ||
+      category === "type-check"
+    ) &&
+    parsedTypeScriptErrors.length > 0
   ) {
-    const firstError =
-      parsedTypeScriptError;
-
-    if (firstError) {
-      return {
-        type: "validation",
+    return parsedTypeScriptErrors.map(
+      (
+        error
+      ): ValidationFinding => ({
+        type:
+          "validation",
 
         severity,
 
         category,
 
-        title: "TypeScript error",
+        title:
+          "TypeScript error",
 
         message:
-          firstError.message,
+          error.message,
 
         command,
 
         exitCode,
 
         evidence:
-          `${firstError.file}(${firstError.line},${firstError.column}) [${firstError.code}]`,
+          `${error.file}(${error.line},${error.column}) [${error.code}]`,
 
         file:
-          firstError.file,
+          error.file,
 
         line:
-          firstError.line,
+          error.line,
 
         column:
-          firstError.column,
+          error.column,
 
         code:
-          firstError.code,
+          error.code,
 
         suggestion:
           createTypeScriptSuggestion(
-            firstError
+            error
           )
-      };
-    }
+      })
+    );
   }
 
   /**
@@ -540,101 +587,87 @@ function createFailureFinding(
         ` Current Node.js version is ${parsedEngineWarning.currentNode}.`;
     }
 
-    return {
-      type: "validation",
+    return [
+      {
+        type:
+          "validation",
 
-      severity: "medium",
+        severity:
+          "medium",
+
+        category,
+
+        title:
+          "Node.js engine warning",
+
+        message:
+          engineMessage,
+
+        command,
+
+        exitCode,
+
+        evidence:
+          output,
+
+        code:
+          "EBADENGINE",
+
+        suggestion:
+          createEngineWarningSuggestion(
+            parsedEngineWarning
+          )
+      }
+    ];
+  }
+
+  /**
+   * Generic validation failure.
+   */
+  return [
+    {
+      type:
+        "validation",
+
+      severity,
 
       category,
 
       title:
-        "Node.js engine warning",
+        `${validationCommand.name} failed`,
 
       message:
-        engineMessage,
+        `The ${validationCommand.name.toLowerCase()} command failed.`,
 
       command,
 
       exitCode,
 
       evidence:
-        output,
-
-      code:
-        "EBADENGINE",
-
-      suggestion:
-        createEngineWarningSuggestion(
-          parsedEngineWarning
-        )
-    };
-  }
-
-  /**
-   * Generic validation failure.
-   */
-  return {
-    type: "validation",
-
-    severity,
-
-    category,
-
-    title:
-      parsedTypeScriptError
-        ? "TypeScript error"
-        : `${validationCommand.name} failed`,
-
-    message:
-      parsedTypeScriptError
-        ? parsedTypeScriptError.message
-        : `The ${validationCommand.name.toLowerCase()} command failed.`,
-
-    command,
-
-    exitCode,
-
-    evidence:
-      parsedTypeScriptError
-        ? `${parsedTypeScriptError.file}(${parsedTypeScriptError.line},${parsedTypeScriptError.column}) [${parsedTypeScriptError.code}]`
-        : output,
-
-    file:
-      parsedTypeScriptError?.file,
-
-    line:
-      parsedTypeScriptError?.line,
-
-    column:
-      parsedTypeScriptError?.column,
-
-    code:
-      parsedTypeScriptError?.code
-  };
+        output
+    }
+  ];
 }
 
 /**
  * Create a stable key for a validation finding.
  *
- * Findings generated by different validation commands
- * may represent the same underlying problem.
+ * The command is intentionally excluded.
  *
- * Example:
+ * This allows:
  *
  * npm run build
- * npx tsc --noEmit -p tsconfig.json
  *
- * Both can produce:
+ * and:
  *
- * app.ts(1,7) TS2322
+ * npx tsc --noEmit
  *
- * We treat them as one logical finding.
+ * to be treated as the same logical finding.
  */
 function getFindingKey(
   finding: ValidationFinding
 ): string {
   return [
-    finding.category,
     finding.code ?? "",
     finding.file ?? "",
     finding.line ?? "",
@@ -645,70 +678,33 @@ function getFindingKey(
 
 /**
  * Remove duplicate validation findings.
- *
- * The same underlying issue can be reported by
- * multiple validations.
- *
- * Example:
- *
- * npm run build
- * npx tsc --noEmit
- *
- * Both may report:
- *
- * app.ts(1,7) [TS2322]
- *
- * We keep only one finding.
- */
-/**
- * Remove duplicate validation findings.
- *
- * The same underlying error may be detected
- * by multiple validation commands.
- *
- * Example:
- *
- * npm run build
- * npx tsc --noEmit
- *
- * Both may report:
- *
- * app.ts(1,7) TS2322
- *
- * These should appear as one finding
- * in the final project report.
  */
 function deduplicateFindings(
   findings: ValidationFinding[]
 ): ValidationFinding[] {
   const uniqueFindings =
-    new Map<string, ValidationFinding>();
+    new Map<
+      string,
+      ValidationFinding
+    >();
 
   for (
-    const finding of findings
+    const finding
+    of findings
   ) {
-    /**
-     * Build a stable identity for the
-     * underlying problem.
-     *
-     * We intentionally do NOT include
-     * the command because the same error
-     * can be detected by different commands.
-     */
-    const key = [
-      finding.category,
-      finding.code ?? "",
-      finding.file ?? "",
-      finding.line ?? "",
-      finding.column ?? "",
-      finding.message.trim()
-    ].join("|");
+    const key =
+      getFindingKey(
+        finding
+      );
 
-    /**
-     * Keep the first occurrence.
-     */
+    console.log(
+      `🔑 Finding Key: ${key}`
+    );
+
     if (
-      !uniqueFindings.has(key)
+      !uniqueFindings.has(
+        key
+      )
     ) {
       uniqueFindings.set(
         key,
@@ -717,20 +713,20 @@ function deduplicateFindings(
     }
   }
 
-  return Array.from(
-    uniqueFindings.values()
+  const result =
+    Array.from(
+      uniqueFindings.values()
+    );
+
+  console.log(
+    `🔎 Deduplication: ${findings.length} → ${result.length}`
   );
+
+  return result;
 }
 
 /**
  * Create a skipped validation result.
- *
- * We use:
- *
- * command = "__skip__"
- *
- * to represent validations that
- * are not available for a project.
  */
 function createSkippedResult(
   validationCommand: ValidationCommand
@@ -744,15 +740,26 @@ function createSkippedResult(
         validationCommand
       ),
 
-    status: "skipped",
+    status:
+      "skipped",
 
-    exitCode: null,
+    exitCode:
+      null,
 
-    stdout: "",
+    stdout:
+      "",
 
-    stderr: "",
+    stderr:
+      "",
 
-    durationMs: 0
+    durationMs:
+      0,
+
+    findings:
+      [],
+
+    warnings:
+      []
   };
 }
 
@@ -769,7 +776,8 @@ function runCommand(
         Date.now();
 
       const isWindows =
-        process.platform === "win32";
+        process.platform ===
+        "win32";
 
       /**
        * On Windows npm is executed
@@ -791,13 +799,18 @@ function runCommand(
       const child =
         spawn(
           executable,
+
           validationCommand.args,
+
           {
-            cwd: projectPath,
+            cwd:
+              projectPath,
 
-            shell: isWindows,
+            shell:
+              isWindows,
 
-            windowsHide: true,
+            windowsHide:
+              true,
 
             stdio: [
               "ignore",
@@ -807,9 +820,11 @@ function runCommand(
           }
         );
 
-      let stdout = "";
+      let stdout =
+        "";
 
-      let stderr = "";
+      let stderr =
+        "";
 
       /**
        * Capture stdout.
@@ -839,7 +854,8 @@ function runCommand(
       child.on(
         "close",
         (exitCode) => {
-          const status =
+          const status:
+            ValidationStatus =
             exitCode === 0
               ? "passed"
               : "failed";
@@ -863,9 +879,14 @@ function runCommand(
             stderr,
 
             durationMs:
-              Date.now() - started,
+              Date.now() -
+              started,
 
-            warnings: []
+            findings:
+              [],
+
+            warnings:
+              []
           };
 
           /**
@@ -878,7 +899,7 @@ function runCommand(
 
           /**
            * Detect Node/npm engine warning
-           * even when the command succeeded.
+           * even when command succeeds.
            */
           const parsedEngineWarning =
             parseEngineWarning(
@@ -921,9 +942,11 @@ function runCommand(
 
             const warningFinding:
               ValidationFinding = {
-              type: "validation",
+              type:
+                "validation",
 
-              severity: "medium",
+              severity:
+                "medium",
 
               category:
                 getValidationCategory(
@@ -962,13 +985,14 @@ function runCommand(
 
           /**
            * If command failed,
-           * attach a structured finding.
+           * attach structured findings.
            */
           if (
-            status === "failed"
+            status ===
+            "failed"
           ) {
-            result.finding =
-              createFailureFinding(
+            result.findings =
+              createFailureFindings(
                 validationCommand,
                 exitCode,
                 stdout,
@@ -976,7 +1000,9 @@ function runCommand(
               );
           }
 
-          resolve(result);
+          resolve(
+            result
+          );
         }
       );
 
@@ -1001,9 +1027,11 @@ function runCommand(
                 validationCommand
               ),
 
-            status: "failed",
+            status:
+              "failed",
 
-            exitCode: null,
+            exitCode:
+              null,
 
             stdout,
 
@@ -1011,20 +1039,27 @@ function runCommand(
               errorOutput,
 
             durationMs:
-              Date.now() - started,
+              Date.now() -
+              started,
 
-            warnings: []
+            findings:
+              [],
+
+            warnings:
+              []
           };
 
-          result.finding =
-            createFailureFinding(
+          result.findings =
+            createFailureFindings(
               validationCommand,
               null,
               stdout,
               errorOutput
             );
 
-          resolve(result);
+          resolve(
+            result
+          );
         }
       );
     }
@@ -1039,7 +1074,6 @@ export async function validateProject(
   commands: ValidationCommand[],
   packageManager = "npm"
 ): Promise<ValidationReport> {
-
   const startedAt =
     new Date().toISOString();
 
@@ -1052,13 +1086,222 @@ export async function validateProject(
   const warnings:
     ValidationFinding[] = [];
 
-  // ... tumhara existing for loop ...
-  // ... saare commands yahan run honge ...
+  /**
+   * Run every validation command.
+   */
+  for (
+    const validationCommand
+    of commands
+  ) {
+    console.log("");
 
+    console.log(
+      `▶ Running command: ${getCommandText(validationCommand)}`
+    );
+
+    /**
+     * Run command.
+     */
+    const result =
+      await runCommand(
+        projectPath,
+        validationCommand
+      );
+
+    /**
+     * Store result.
+     */
+    results.push(
+      result
+    );
+
+    /**
+     * Collect findings.
+     */
+    if (
+      result.findings &&
+      result.findings.length > 0
+    ) {
+      findings.push(
+        ...result.findings
+      );
+    }
+
+    /**
+     * Collect warnings.
+     */
+    if (
+      result.warnings &&
+      result.warnings.length > 0
+    ) {
+      warnings.push(
+        ...result.warnings
+      );
+    }
+
+    /**
+     * Print status.
+     */
+    if (
+      result.status ===
+      "passed"
+    ) {
+      console.log(
+        `✅ ${result.name}`
+      );
+    }
+
+    if (
+      result.status ===
+      "failed"
+    ) {
+      console.log(
+        `❌ ${result.name}`
+      );
+
+      /**
+       * Print every finding
+       * generated by this command.
+       */
+      if (
+        result.findings &&
+        result.findings.length > 0
+      ) {
+        for (
+          const finding
+          of result.findings
+        ) {
+          console.log("");
+
+          console.log(
+            `Severity: ${finding.severity}`
+          );
+
+          console.log(
+            `Category: ${finding.category}`
+          );
+
+          console.log(
+            `Finding: ${finding.title}`
+          );
+
+          console.log(
+            `Message: ${finding.message}`
+          );
+
+          if (
+            finding.file
+          ) {
+            console.log(
+              `File: ${finding.file}`
+            );
+          }
+
+          if (
+            finding.line !==
+            undefined
+          ) {
+            console.log(
+              `Line: ${finding.line}`
+            );
+          }
+
+          if (
+            finding.column !==
+            undefined
+          ) {
+            console.log(
+              `Column: ${finding.column}`
+            );
+          }
+
+          if (
+            finding.code
+          ) {
+            console.log(
+              `Code: ${finding.code}`
+            );
+          }
+
+          if (
+            finding.suggestion
+          ) {
+            console.log(
+              `💡 Suggested Fix: ${finding.suggestion}`
+            );
+          }
+        }
+      }
+    }
+
+    /**
+     * Print warnings.
+     */
+    if (
+      result.warnings &&
+      result.warnings.length > 0
+    ) {
+      for (
+        const warning
+        of result.warnings
+      ) {
+        console.log("");
+
+        console.log(
+          `⚠️ ${warning.title}`
+        );
+
+        console.log(
+          warning.message
+        );
+
+        if (
+          warning.suggestion
+        ) {
+          console.log(
+            `💡 Suggested Fix: ${warning.suggestion}`
+          );
+        }
+      }
+    }
+
+    /**
+     * Print stdout.
+     */
+    if (
+      result.stdout.trim()
+    ) {
+      console.log("");
+
+      console.log(
+        "STDOUT:"
+      );
+
+      console.log(
+        result.stdout.trim()
+      );
+    }
+
+    /**
+     * Print stderr.
+     */
+    if (
+      result.stderr.trim()
+    ) {
+      console.log("");
+
+      console.log(
+        "STDERR:"
+      );
+
+      console.log(
+        result.stderr.trim()
+      );
+    }
+  }
 
   /**
-   * Remove duplicate findings
-   * before creating the final report.
+   * Remove duplicate findings.
    */
   const uniqueFindings =
     deduplicateFindings(
@@ -1066,8 +1309,7 @@ export async function validateProject(
     );
 
   /**
-   * Remove duplicate warnings
-   * before creating the final report.
+   * Remove duplicate warnings.
    */
   const uniqueWarnings =
     deduplicateFindings(
@@ -1079,7 +1321,8 @@ export async function validateProject(
    * there are no validation findings.
    */
   const passed =
-    uniqueFindings.length === 0;
+    uniqueFindings.length ===
+    0;
 
   const completedAt =
     new Date().toISOString();
