@@ -245,6 +245,12 @@ async function scanProject(
             result.status === "failed"
         ).length,
 
+      warningCount:
+        validationReport.results.filter(
+          result =>
+            result.status === "warning"
+        ).length,
+
       skippedCount:
         validationReport.results.filter(
           result =>

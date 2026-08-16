@@ -92,6 +92,12 @@ const failed =
       result.status === "failed"
   ).length;
 
+const warningResults =
+  report.results.filter(
+    (result) =>
+      result.status === "warning"
+  ).length;
+
 const skipped =
   report.results.filter(
     (result) =>
@@ -111,6 +117,10 @@ console.log(
 
 console.log(
   `Failed:   ${failed}`
+);
+
+console.log(
+  `Warning:  ${warningResults}`
 );
 
 console.log(

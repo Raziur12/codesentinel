@@ -8,6 +8,7 @@ import path from "node:path";
  */
 export type ValidationStatus =
   | "passed"
+  | "warning"
   | "failed"
   | "skipped";
 
@@ -42,7 +43,13 @@ export interface ValidationCommand {
 
   args: string[];
 
-  available?: boolean;
+  executable: string;
+
+  available: boolean;
+
+  category: ValidationCategory;
+
+  priority: number;
 
   skipReason?: string;
 }
@@ -89,6 +96,8 @@ export interface ValidationResult {
   command: string;
 
   status: ValidationStatus;
+
+  category: ValidationCategory;
 
   exitCode: number | null;
 
@@ -311,6 +320,8 @@ function detectPackageManager(
 
 function createCommand(
   name: string,
+  category: ValidationCategory,
+  priority: number,
   command: string,
   args: string[],
   available = true,
@@ -320,7 +331,11 @@ function createCommand(
     name,
     command,
     args,
+    executable:
+      command,
     available,
+    category,
+    priority,
     skipReason
   };
 }
@@ -395,6 +410,8 @@ async function hasWorkspaceScript(
 
 async function createScriptCommand(
   name: string,
+  category: ValidationCategory,
+  priority: number,
   packageManager: string,
   scriptName: string,
   scripts: Record<string, string> | undefined,
@@ -418,6 +435,8 @@ async function createScriptCommand(
     ) {
       return createCommand(
         name,
+        category,
+        priority,
         packageManager,
         ["run", scriptName],
         false,
@@ -427,6 +446,8 @@ async function createScriptCommand(
 
     return createCommand(
       name,
+      category,
+      priority,
       packageManager,
       ["run", scriptName]
     );
@@ -434,6 +455,8 @@ async function createScriptCommand(
 
   return createCommand(
     name,
+    category,
+    priority,
     packageManager,
     ["run", scriptName],
     false,
@@ -500,11 +523,15 @@ export async function discoverValidationPlan(
     packageJson
       ? createCommand(
           "Install dependencies",
+          "dependency",
+          10,
           packageManager,
           ["install"]
         )
       : createCommand(
           "Install dependencies",
+          "dependency",
+          10,
           packageManager,
           ["install"],
           false,
@@ -515,6 +542,8 @@ export async function discoverValidationPlan(
     tsconfig
       ? createCommand(
           "Type Check",
+          "type-check",
+          50,
           "npx",
           [
             "tsc",
@@ -525,6 +554,8 @@ export async function discoverValidationPlan(
         )
       : createCommand(
           "Type Check",
+          "type-check",
+          50,
           "npx",
           [
             "tsc",
@@ -543,6 +574,8 @@ export async function discoverValidationPlan(
       installCommand,
       await createScriptCommand(
         "Build",
+        "build",
+        20,
         packageManager,
         "build",
         scripts,
@@ -551,6 +584,8 @@ export async function discoverValidationPlan(
       ),
       await createScriptCommand(
         "Test",
+        "test",
+        30,
         packageManager,
         "test",
         scripts,
@@ -559,6 +594,8 @@ export async function discoverValidationPlan(
       ),
       await createScriptCommand(
         "Lint",
+        "lint",
+        40,
         packageManager,
         "lint",
         scripts,
@@ -826,9 +863,7 @@ function createFailureFindings(
     );
 
   const category =
-    getValidationCategory(
-      validationCommand.name
-    );
+    validationCommand.category;
 
   const severity =
     getValidationSeverity(
@@ -1113,6 +1148,9 @@ function createSkippedResult(
     status:
       "skipped",
 
+    category:
+      validationCommand.category,
+
     exitCode:
       null,
 
@@ -1244,6 +1282,9 @@ function runCommand(
 
             status,
 
+            category:
+              validationCommand.category,
+
             exitCode,
 
             stdout,
@@ -1321,9 +1362,7 @@ function runCommand(
                 "medium",
 
               category:
-                getValidationCategory(
-                  validationCommand.name
-                ),
+                validationCommand.category,
 
               title:
                 "Node.js engine warning",
@@ -1353,6 +1392,15 @@ function runCommand(
             result.warnings?.push(
               warningFinding
             );
+          }
+
+          if (
+            status === "passed" &&
+            result.warnings &&
+            result.warnings.length > 0
+          ) {
+            result.status =
+              "warning";
           }
 
           /**
@@ -1401,6 +1449,9 @@ function runCommand(
 
             status:
               "failed",
+
+            category:
+              validationCommand.category,
 
             exitCode:
               null,
@@ -1540,6 +1591,15 @@ export async function validateProject(
     ) {
       console.log(
         `✅ ${result.name}`
+      );
+    }
+
+    if (
+      result.status ===
+      "warning"
+    ) {
+      console.log(
+        `⚠️ ${result.name}`
       );
     }
 

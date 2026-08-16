@@ -63,6 +63,7 @@ export interface ValidationSummary {
   total: number;
   passedCount: number;
   failedCount: number;
+  warningCount: number;
   skippedCount: number;
 }
 
