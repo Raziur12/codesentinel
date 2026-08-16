@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import {
+  discoverValidationPlan,
   validateProject
 } from "@codesentinel/validation-engine";
 
@@ -145,44 +146,18 @@ async function scanProject(
 
 
   /*
-   * 6. Run project validation
+   * 6. Discover and run project validation
    */
+  const validationPlan =
+    await discoverValidationPlan(
+      projectPath
+    );
+
   const validationReport =
     await validateProject(
       projectPath,
-      [
-        {
-          name: "Install dependencies",
-          command: "npm",
-          args: ["install"]
-        },
-        {
-          name: "Build",
-          command: "npm",
-          args: ["run", "build"]
-        },
-        {
-          name: "Test",
-          command: "npm",
-          args: ["test"]
-        },
-        {
-          name: "Lint",
-          command: "npm",
-          args: ["run", "lint"]
-        },
-        {
-          name: "Type Check",
-          command: "npx",
-          args: [
-            "tsc",
-            "--noEmit",
-            "-p",
-            "tsconfig.json"
-          ]
-        }
-      ],
-      "npm"
+      validationPlan.commands,
+      validationPlan.packageManager
     );
 
 

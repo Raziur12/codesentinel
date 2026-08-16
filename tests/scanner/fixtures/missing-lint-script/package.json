@@ -1,0 +1,11 @@
+{
+  "name": "missing-lint-script",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"Tests passed\""
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}

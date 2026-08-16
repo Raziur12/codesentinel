@@ -1,0 +1,11 @@
+{
+  "name": "missing-build-script",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "echo \"Tests passed\"",
+    "lint": "echo \"Lint passed\""
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}

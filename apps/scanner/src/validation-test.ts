@@ -1,4 +1,5 @@
 import {
+  discoverValidationPlan,
   validateProject
 } from "@codesentinel/validation-engine";
 
@@ -42,65 +43,13 @@ console.log(
 
 console.log("");
 
-/**
- * Validation commands
- */
-const commands = [
-  {
-    name: "Install dependencies",
+const validationPlan =
+  await discoverValidationPlan(
+    projectPath
+  );
 
-    command: "npm",
-
-    args: [
-      "install"
-    ]
-  },
-
-  {
-    name: "Build",
-
-    command: "npm",
-
-    args: [
-      "run",
-      "build"
-    ]
-  },
-
-  {
-    name: "Test",
-
-    command: "npm",
-
-    args: [
-      "test"
-    ]
-  },
-
-  {
-    name: "Lint",
-
-    command: "npm",
-
-    args: [
-      "run",
-      "lint"
-    ]
-  },
-
-  {
-    name: "Type Check",
-
-    command: "npx",
-
-    args: [
-      "tsc",
-      "--noEmit",
-      "-p",
-      "tsconfig.json"
-    ]
-  }
-];
+const commands =
+  validationPlan.commands;
 console.log("\n🔍 Validation Commands:");
 console.log(
   JSON.stringify(commands, null, 2)
@@ -110,7 +59,7 @@ const report =
   await validateProject(
     projectPath,
     commands,
-    "npm"
+    validationPlan.packageManager
   );
 
 console.log("");

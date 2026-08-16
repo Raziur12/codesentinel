@@ -6,7 +6,7 @@
   "packageManager": "npm@11",
   "scripts": {
     "scanner": "npm --workspace apps/scanner run dev",
-    "scanner:build": "npm --workspace apps/scanner run build",
+    "scanner:build": "npm --workspace packages/scanner-core run build && npm --workspace packages/project-analyzer run build && npm --workspace packages/technology-detectors run build && npm --workspace packages/validation-engine run build && npm --workspace apps/scanner run build",
     "scanner:start": "npm --workspace apps/scanner run start",
     "test": "npm run test --workspaces"
   },

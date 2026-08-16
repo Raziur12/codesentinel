@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import type { Dirent } from "node:fs";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 /**
  * Validation status.
@@ -38,6 +41,10 @@ export interface ValidationCommand {
   command: string;
 
   args: string[];
+
+  available?: boolean;
+
+  skipReason?: string;
 }
 
 /**
@@ -94,6 +101,26 @@ export interface ValidationResult {
   findings?: ValidationFinding[];
 
   warnings?: ValidationFinding[];
+
+  skipReason?: string;
+}
+
+interface PackageJson {
+  scripts?: Record<string, string>;
+
+  packageManager?: string;
+
+  workspaces?: string[] | {
+    packages?: string[];
+  };
+}
+
+export interface ValidationPlan {
+  packageManager: string;
+
+  commands: ValidationCommand[];
+
+  workspaces: string[];
 }
 
 /**
@@ -202,6 +229,345 @@ function getCommandText(
     validationCommand.command,
     ...validationCommand.args
   ].join(" ");
+}
+
+async function fileExists(
+  filePath: string
+): Promise<boolean> {
+  try {
+    const stats =
+      await fs.stat(filePath);
+
+    return stats.isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function readPackageJson(
+  projectPath: string
+): Promise<PackageJson | null> {
+  const packageJsonPath =
+    path.join(
+      projectPath,
+      "package.json"
+    );
+
+  if (
+    !(await fileExists(packageJsonPath))
+  ) {
+    return null;
+  }
+
+  try {
+    const content =
+      await fs.readFile(
+        packageJsonPath,
+        "utf8"
+      );
+
+    return JSON.parse(
+      content
+    ) as PackageJson;
+  } catch {
+    return null;
+  }
+}
+
+function getWorkspacePatterns(
+  packageJson: PackageJson | null
+): string[] {
+  if (
+    !packageJson?.workspaces
+  ) {
+    return [];
+  }
+
+  if (
+    Array.isArray(
+      packageJson.workspaces
+    )
+  ) {
+    return packageJson.workspaces;
+  }
+
+  return packageJson.workspaces.packages ?? [];
+}
+
+function detectPackageManager(
+  packageJson: PackageJson | null
+): string {
+  const declaredManager =
+    packageJson?.packageManager?.split("@")[0];
+
+  if (
+    declaredManager
+  ) {
+    return declaredManager;
+  }
+
+  return "npm";
+}
+
+function createCommand(
+  name: string,
+  command: string,
+  args: string[],
+  available = true,
+  skipReason?: string
+): ValidationCommand {
+  return {
+    name,
+    command,
+    args,
+    available,
+    skipReason
+  };
+}
+
+async function hasWorkspaceScript(
+  projectPath: string,
+  workspacePatterns: string[],
+  scriptName: string
+): Promise<boolean> {
+  for (
+    const workspacePattern
+    of workspacePatterns
+  ) {
+    const normalizedPattern =
+      workspacePattern.replace(/\\/g, "/");
+
+    if (
+      !normalizedPattern.endsWith("/*")
+    ) {
+      continue;
+    }
+
+    const parentDirectory =
+      path.join(
+        projectPath,
+        normalizedPattern.slice(0, -2)
+      );
+
+    let entries:
+      | Dirent[];
+
+    try {
+      entries =
+        await fs.readdir(
+          parentDirectory,
+          {
+            withFileTypes: true
+          }
+        );
+    } catch {
+      continue;
+    }
+
+    for (
+      const entry
+      of entries
+    ) {
+      if (
+        !entry.isDirectory()
+      ) {
+        continue;
+      }
+
+      const workspacePackageJson =
+        await readPackageJson(
+          path.join(
+            parentDirectory,
+            entry.name
+          )
+        );
+
+      if (
+        workspacePackageJson?.scripts?.[scriptName]
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+async function createScriptCommand(
+  name: string,
+  packageManager: string,
+  scriptName: string,
+  scripts: Record<string, string> | undefined,
+  projectPath: string,
+  workspacePatterns: string[]
+): Promise<ValidationCommand> {
+  if (
+    scripts?.[scriptName]
+  ) {
+    const isWorkspaceFanOut =
+      scripts[scriptName].includes("--workspaces") ||
+      scripts[scriptName].includes("-ws");
+
+    if (
+      isWorkspaceFanOut &&
+      !(await hasWorkspaceScript(
+        projectPath,
+        workspacePatterns,
+        scriptName
+      ))
+    ) {
+      return createCommand(
+        name,
+        packageManager,
+        ["run", scriptName],
+        false,
+        `No workspace ${scriptName} script found`
+      );
+    }
+
+    return createCommand(
+      name,
+      packageManager,
+      ["run", scriptName]
+    );
+  }
+
+  return createCommand(
+    name,
+    packageManager,
+    ["run", scriptName],
+    false,
+    `No ${scriptName} script found`
+  );
+}
+
+async function findTypeScriptConfig(
+  projectPath: string
+): Promise<string | null> {
+  const entries =
+    await fs.readdir(
+      projectPath,
+      {
+        withFileTypes: true
+      }
+    );
+
+  const configNames =
+    entries
+      .filter(
+        entry =>
+          entry.isFile() &&
+          /^tsconfig(?:\..+)?\.json$/i.test(
+            entry.name
+          )
+      )
+      .map(
+        entry =>
+          entry.name
+      )
+      .sort();
+
+  return configNames[0] ?? null;
+}
+
+export async function discoverValidationPlan(
+  projectPath: string
+): Promise<ValidationPlan> {
+  const packageJson =
+    await readPackageJson(
+      projectPath
+    );
+
+  const packageManager =
+    detectPackageManager(
+      packageJson
+    );
+
+  const scripts =
+    packageJson?.scripts;
+
+  const workspaces =
+    getWorkspacePatterns(
+      packageJson
+    );
+
+  const tsconfig =
+    await findTypeScriptConfig(
+      projectPath
+    );
+
+  const installCommand =
+    packageJson
+      ? createCommand(
+          "Install dependencies",
+          packageManager,
+          ["install"]
+        )
+      : createCommand(
+          "Install dependencies",
+          packageManager,
+          ["install"],
+          false,
+          "No package.json found"
+        );
+
+  const typeCheckCommand =
+    tsconfig
+      ? createCommand(
+          "Type Check",
+          "npx",
+          [
+            "tsc",
+            "--noEmit",
+            "-p",
+            tsconfig
+          ]
+        )
+      : createCommand(
+          "Type Check",
+          "npx",
+          [
+            "tsc",
+            "--noEmit",
+            "-p",
+            "tsconfig.json"
+          ],
+          false,
+          "No TypeScript config found"
+        );
+
+  return {
+    packageManager,
+    workspaces,
+    commands: [
+      installCommand,
+      await createScriptCommand(
+        "Build",
+        packageManager,
+        "build",
+        scripts,
+        projectPath,
+        workspaces
+      ),
+      await createScriptCommand(
+        "Test",
+        packageManager,
+        "test",
+        scripts,
+        projectPath,
+        workspaces
+      ),
+      await createScriptCommand(
+        "Lint",
+        packageManager,
+        "lint",
+        scripts,
+        projectPath,
+        workspaces
+      ),
+      typeCheckCommand
+    ]
+  };
 }
 
 /**
@@ -731,6 +1097,10 @@ function deduplicateFindings(
 function createSkippedResult(
   validationCommand: ValidationCommand
 ): ValidationResult {
+  const skipReason =
+    validationCommand.skipReason ??
+    "Validation command is not available";
+
   return {
     name:
       validationCommand.name,
@@ -759,7 +1129,9 @@ function createSkippedResult(
       [],
 
     warnings:
-      []
+      [],
+
+    skipReason
   };
 }
 
@@ -1094,6 +1466,26 @@ export async function validateProject(
     of commands
   ) {
     console.log("");
+
+    if (
+      validationCommand.available ===
+      false
+    ) {
+      const result =
+        createSkippedResult(
+          validationCommand
+        );
+
+      results.push(
+        result
+      );
+
+      console.log(
+        `⏭️ Skipped ${result.name}: ${result.skipReason}`
+      );
+
+      continue;
+    }
 
     console.log(
       `▶ Running command: ${getCommandText(validationCommand)}`
