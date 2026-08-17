@@ -115,6 +115,8 @@ export interface ValidationResult {
 }
 
 interface PackageJson {
+  name?: string;
+
   scripts?: Record<string, string>;
 
   packageManager?: string;
@@ -124,12 +126,24 @@ interface PackageJson {
   };
 }
 
+export interface ValidationWorkspace {
+  name?: string;
+
+  path: string;
+
+  relativePath: string;
+
+  scripts: string[];
+}
+
 export interface ValidationPlan {
   packageManager: string;
 
   commands: ValidationCommand[];
 
-  workspaces: string[];
+  workspacePatterns: string[];
+
+  workspaces: ValidationWorkspace[];
 }
 
 /**
@@ -340,11 +354,13 @@ function createCommand(
   };
 }
 
-async function hasWorkspaceScript(
+async function discoverWorkspaces(
   projectPath: string,
-  workspacePatterns: string[],
-  scriptName: string
-): Promise<boolean> {
+  workspacePatterns: string[]
+): Promise<ValidationWorkspace[]> {
+  const workspaces:
+    ValidationWorkspace[] = [];
+
   for (
     const workspacePattern
     of workspacePatterns
@@ -389,23 +405,62 @@ async function hasWorkspaceScript(
         continue;
       }
 
+      const workspacePath =
+        path.join(
+          parentDirectory,
+          entry.name
+        );
+
       const workspacePackageJson =
         await readPackageJson(
-          path.join(
-            parentDirectory,
-            entry.name
-          )
+          workspacePath
         );
 
       if (
-        workspacePackageJson?.scripts?.[scriptName]
+        !workspacePackageJson
       ) {
-        return true;
+        continue;
       }
+
+      workspaces.push({
+        name:
+          workspacePackageJson.name,
+
+        path:
+          workspacePath,
+
+        relativePath:
+          path.relative(
+            projectPath,
+            workspacePath
+          ),
+
+        scripts:
+          Object.keys(
+            workspacePackageJson.scripts ?? {}
+          ).sort()
+      });
     }
   }
 
-  return false;
+  return workspaces.sort(
+    (left, right) =>
+      left.relativePath.localeCompare(
+        right.relativePath
+      )
+  );
+}
+
+function hasWorkspaceScript(
+  workspaces: ValidationWorkspace[],
+  scriptName: string
+): boolean {
+  return workspaces.some(
+    workspace =>
+      workspace.scripts.includes(
+        scriptName
+      )
+  );
 }
 
 async function createScriptCommand(
@@ -415,8 +470,7 @@ async function createScriptCommand(
   packageManager: string,
   scriptName: string,
   scripts: Record<string, string> | undefined,
-  projectPath: string,
-  workspacePatterns: string[]
+  workspaces: ValidationWorkspace[]
 ): Promise<ValidationCommand> {
   if (
     scripts?.[scriptName]
@@ -427,11 +481,10 @@ async function createScriptCommand(
 
     if (
       isWorkspaceFanOut &&
-      !(await hasWorkspaceScript(
-        projectPath,
-        workspacePatterns,
+      !hasWorkspaceScript(
+        workspaces,
         scriptName
-      ))
+      )
     ) {
       return createCommand(
         name,
@@ -509,9 +562,15 @@ export async function discoverValidationPlan(
   const scripts =
     packageJson?.scripts;
 
-  const workspaces =
+  const workspacePatterns =
     getWorkspacePatterns(
       packageJson
+    );
+
+  const workspaces =
+    await discoverWorkspaces(
+      projectPath,
+      workspacePatterns
     );
 
   const tsconfig =
@@ -569,6 +628,7 @@ export async function discoverValidationPlan(
 
   return {
     packageManager,
+    workspacePatterns,
     workspaces,
     commands: [
       installCommand,
@@ -579,7 +639,6 @@ export async function discoverValidationPlan(
         packageManager,
         "build",
         scripts,
-        projectPath,
         workspaces
       ),
       await createScriptCommand(
@@ -589,7 +648,6 @@ export async function discoverValidationPlan(
         packageManager,
         "test",
         scripts,
-        projectPath,
         workspaces
       ),
       await createScriptCommand(
@@ -599,7 +657,6 @@ export async function discoverValidationPlan(
         packageManager,
         "lint",
         scripts,
-        projectPath,
         workspaces
       ),
       typeCheckCommand

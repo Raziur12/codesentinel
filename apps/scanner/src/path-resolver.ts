@@ -91,6 +91,38 @@ async function validateProjectPath(
   }
 }
 
+export async function resolveWorkspaceProjectPath(
+  rootProjectPath: string,
+  workspacePath: string
+): Promise<string> {
+  const resolvedWorkspacePath =
+    path.isAbsolute(workspacePath)
+      ? path.normalize(workspacePath)
+      : path.resolve(
+          rootProjectPath,
+          workspacePath
+        );
+
+  const relativeWorkspacePath =
+    path.relative(
+      rootProjectPath,
+      resolvedWorkspacePath
+    );
+
+  if (
+    relativeWorkspacePath.startsWith("..") ||
+    path.isAbsolute(relativeWorkspacePath)
+  ) {
+    throw new Error(
+      `Workspace path must be inside project root: ${workspacePath}`
+    );
+  }
+
+  return validateProjectPath(
+    resolvedWorkspacePath
+  );
+}
+
 export async function resolveProjectPath(
   inputPath: string
 ): Promise<string> {

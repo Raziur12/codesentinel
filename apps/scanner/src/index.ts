@@ -26,8 +26,90 @@ import {
 } from "@codesentinel/technology-detectors";
 
 import {
-  resolveProjectPath
+  resolveProjectPath,
+  resolveWorkspaceProjectPath
 } from "./path-resolver.js";
+
+interface CliOptions {
+  inputPath: string;
+
+  workspacePath?: string;
+}
+
+function parseCliOptions(
+  args: string[]
+): CliOptions {
+  let inputPath:
+    | string
+    | undefined;
+
+  let workspacePath:
+    | string
+    | undefined;
+
+  for (
+    let index = 0;
+    index < args.length;
+    index += 1
+  ) {
+    const arg =
+      args[index];
+
+    if (
+      arg === "--workspace" ||
+      arg === "--scan-workspace" ||
+      arg === "--workspace-path"
+    ) {
+      workspacePath =
+        args[index + 1];
+
+      if (
+        !workspacePath
+      ) {
+        throw new Error(
+          `${arg} requires a workspace path`
+        );
+      }
+
+      index += 1;
+      continue;
+    }
+
+    if (
+      arg.startsWith("workspace=")
+    ) {
+      workspacePath =
+        arg.slice(
+          "workspace=".length
+        );
+
+      continue;
+    }
+
+    if (
+      !inputPath
+    ) {
+      inputPath =
+        arg;
+
+      continue;
+    }
+
+    if (
+      !workspacePath
+    ) {
+      workspacePath =
+        arg;
+    }
+  }
+
+  return {
+    inputPath:
+      inputPath ?? ".",
+
+    workspacePath
+  };
+}
 
 
 async function getFiles(
@@ -265,8 +347,10 @@ async function scanProject(
 
 
 async function main(): Promise<void> {
-  const inputPath =
-    process.argv[2] ?? ".";
+  const cliOptions =
+    parseCliOptions(
+      process.argv.slice(2)
+    );
 
 
   /*
@@ -274,10 +358,31 @@ async function main(): Promise<void> {
    * Resolve the path from the repository root,
    * not from apps/scanner.
    */
-  const projectPath =
+  const rootProjectPath =
     await resolveProjectPath(
-      inputPath
+      cliOptions.inputPath
     );
+
+  const projectPath =
+    cliOptions.workspacePath
+      ? await resolveWorkspaceProjectPath(
+          rootProjectPath,
+          cliOptions.workspacePath
+        )
+      : rootProjectPath;
+
+  const displayInput =
+    cliOptions.workspacePath
+      ? `${cliOptions.inputPath} --workspace ${cliOptions.workspacePath}`
+      : cliOptions.inputPath;
+
+  const relativeWorkspacePath =
+    cliOptions.workspacePath
+      ? path.relative(
+          rootProjectPath,
+          projectPath
+        )
+      : undefined;
 
 
   console.log(
@@ -289,8 +394,16 @@ async function main(): Promise<void> {
   );
 
   console.log(
-    `Input: ${inputPath}`
+    `Input: ${displayInput}`
   );
+
+  if (
+    relativeWorkspacePath
+  ) {
+    console.log(
+      `Workspace: ${relativeWorkspacePath}`
+    );
+  }
 
   console.log(
     `Resolved Project: ${projectPath}`
