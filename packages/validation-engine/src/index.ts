@@ -206,6 +206,30 @@ interface TestFrameworkInfo {
   skipReason?: string;
 }
 
+type LintToolName =
+  | "eslint"
+  | "biome"
+  | "prettier"
+  | "stylelint"
+  | "generic-node"
+  | "unknown";
+
+interface LintToolInfo {
+  name: LintToolName;
+
+  confidence: number;
+
+  evidence: string[];
+}
+
+interface LintDetectionInfo {
+  tools: LintToolInfo[];
+
+  hasLintScript: boolean;
+
+  skipReason?: string;
+}
+
 export interface ValidationWorkspace {
   name?: string;
 
@@ -1127,6 +1151,246 @@ function detectTestFramework(
   };
 }
 
+function scriptIncludesToken(
+  scripts: Record<string, string> | undefined,
+  token: string
+): boolean {
+  return Object.values(scripts ?? {}).some(
+    script =>
+      new RegExp(`(^|\\s)${token}(\\s|$)`, "i").test(script)
+  );
+}
+
+function createLintToolInfo(
+  name: Exclude<LintToolName, "generic-node" | "unknown">,
+  evidence: string[]
+): LintToolInfo {
+  return {
+    name,
+    confidence:
+      evidence.length > 1 ? 0.99 : 0.9,
+    evidence
+  };
+}
+
+function detectLintTools(
+  files: string[],
+  packageJson: PackageJson | null
+): LintDetectionInfo {
+  const scripts =
+    packageJson?.scripts;
+
+  const hasLintScript =
+    Boolean(
+      scripts?.lint
+    );
+
+  const dependencies =
+    getDependencies(
+      packageJson
+    );
+
+  const toolChecks: Array<{
+    name: Exclude<LintToolName, "generic-node" | "unknown">;
+    label: string;
+    evidence: string[];
+  }> = [
+    {
+      name:
+        "eslint",
+      label:
+        "ESLint",
+      evidence: [
+        hasConfigFile(
+          files,
+          /^eslint\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        ) ||
+        hasConfigFile(
+          files,
+          /^\.eslintrc(?:\.(js|cjs|json|yaml|yml))?$/i
+        )
+          ? "eslint config detected"
+          : undefined,
+        hasDependency(
+          dependencies,
+          "eslint"
+        )
+          ? "eslint dependency detected"
+          : undefined,
+        scriptIncludesToken(
+          scripts,
+          "eslint"
+        )
+          ? "eslint script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      name:
+        "biome",
+      label:
+        "Biome",
+      evidence: [
+        hasConfigFile(
+          files,
+          /^biome\.jsonc?$/i
+        )
+          ? "biome config detected"
+          : undefined,
+        hasDependency(
+          dependencies,
+          "@biomejs/biome"
+        )
+          ? "biome dependency detected"
+          : undefined,
+        scriptIncludesToken(
+          scripts,
+          "biome"
+        )
+          ? "biome script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      name:
+        "prettier",
+      label:
+        "Prettier",
+      evidence: [
+        hasConfigFile(
+          files,
+          /^\.prettierrc(?:\.(js|cjs|mjs|json|yaml|yml|toml))?$/i
+        ) ||
+        hasConfigFile(
+          files,
+          /^prettier\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        ) ||
+        hasConfigFile(
+          files,
+          /^\.prettierignore$/i
+        )
+          ? "prettier config detected"
+          : undefined,
+        hasDependency(
+          dependencies,
+          "prettier"
+        )
+          ? "prettier dependency detected"
+          : undefined,
+        scriptIncludesToken(
+          scripts,
+          "prettier"
+        )
+          ? "prettier script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      name:
+        "stylelint",
+      label:
+        "Stylelint",
+      evidence: [
+        hasConfigFile(
+          files,
+          /^stylelint\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        ) ||
+        hasConfigFile(
+          files,
+          /^\.stylelintrc(?:\.(js|cjs|json|yaml|yml))?$/i
+        )
+          ? "stylelint config detected"
+          : undefined,
+        hasDependency(
+          dependencies,
+          "stylelint"
+        )
+          ? "stylelint dependency detected"
+          : undefined,
+        scriptIncludesToken(
+          scripts,
+          "stylelint"
+        )
+          ? "stylelint script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    }
+  ];
+
+  const tools =
+    toolChecks
+      .filter(
+        tool =>
+          tool.evidence.length > 0
+      )
+      .map(
+        tool =>
+          createLintToolInfo(
+            tool.name,
+            tool.evidence
+          )
+      );
+
+  if (
+    tools.length > 0
+  ) {
+    const labels =
+      toolChecks
+        .filter(
+          tool =>
+            tool.evidence.length > 0
+        )
+        .map(
+          tool =>
+            tool.label
+        );
+
+    return {
+      tools,
+      hasLintScript,
+      skipReason:
+        hasLintScript
+          ? undefined
+          : `Lint tools detected (${labels.join(", ")}) but no lint script found`
+    };
+  }
+
+  if (
+    hasLintScript
+  ) {
+    return {
+      tools: [
+        {
+          name:
+            "generic-node",
+          confidence:
+            0.75,
+          evidence:
+            ["package.json lint script detected"]
+        }
+      ],
+      hasLintScript
+    };
+  }
+
+  return {
+    tools: [
+      {
+        name:
+          "unknown",
+        confidence:
+          0,
+        evidence:
+          []
+      }
+    ],
+    hasLintScript:
+      false,
+    skipReason:
+      "No lint script found"
+  };
+}
+
 async function createScriptCommand(
   name: string,
   category: ValidationCategory,
@@ -1240,6 +1504,67 @@ function createTestCommand(
         testFramework.confidence,
       evidence:
         testFramework.evidence
+    }
+  );
+}
+
+function createLintCommand(
+  packageManager: string,
+  packageManagerCommands: PackageManagerCommands,
+  lintDetection: LintDetectionInfo,
+  scripts: Record<string, string> | undefined,
+  workspaces: ValidationWorkspace[]
+): ValidationCommand {
+  const lintScript =
+    scripts?.lint;
+
+  const isWorkspaceFanOut =
+    Boolean(
+      lintScript?.includes("--workspaces") ||
+      lintScript?.includes("-ws")
+    );
+
+  const hasWorkspaceLintScript =
+    !isWorkspaceFanOut ||
+    hasWorkspaceScript(
+      workspaces,
+      "lint"
+    );
+
+  const available =
+    lintDetection.hasLintScript &&
+    hasWorkspaceLintScript;
+
+  const skipReason =
+    lintDetection.hasLintScript &&
+    !hasWorkspaceLintScript
+      ? "No workspace lint script found"
+      : lintDetection.skipReason ?? "No lint script found";
+
+  return createCommand(
+    "Lint",
+    "lint",
+    40,
+    packageManager,
+    packageManagerCommands.run(
+      "lint"
+    ),
+    available,
+    available
+      ? undefined
+      : skipReason,
+    {
+      lintTools:
+        lintDetection.tools.map(
+          tool => ({
+            name:
+              tool.name,
+            confidence:
+              tool.confidence,
+            evidence:
+              tool.evidence
+          })
+        )
     }
   );
 }
@@ -1436,6 +1761,12 @@ export async function discoverValidationPlan(
       packageJson
     );
 
+  const lintDetection =
+    detectLintTools(
+      projectFiles,
+      packageJson
+    );
+
   const installCommand =
     packageJson
       ? createCommand(
@@ -1502,13 +1833,10 @@ export async function discoverValidationPlan(
         packageManagerCommands,
         testFramework
       ),
-      await createScriptCommand(
-        "Lint",
-        "lint",
-        40,
+      createLintCommand(
         packageManager,
         packageManagerCommands,
-        "lint",
+        lintDetection,
         scripts,
         workspaces
       ),

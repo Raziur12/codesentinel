@@ -146,18 +146,26 @@ function detectConfiguration(
       /^cypress\.config\.(ts|js|mts|mjs|cts|cjs)$/i.test(basename) ||
       /^\.mocharc(?:\.(js|cjs|json|yaml|yml))?$/i.test(basename) ||
       /^jasmine\.(json|js)$/i.test(basename) ||
+      /^eslint\.config\.(ts|js|mts|mjs|cts|cjs)$/i.test(basename) ||
+      /^\.eslintrc(?:\.(js|cjs|json|yaml|yml))?$/i.test(basename) ||
+      /^biome\.jsonc?$/i.test(basename) ||
+      /^\.prettierrc(?:\.(js|cjs|mjs|json|yaml|yml|toml))?$/i.test(basename) ||
+      /^prettier\.config\.(ts|js|mts|mjs|cts|cjs)$/i.test(basename) ||
+      /^\.prettierignore$/i.test(basename) ||
+      /^stylelint\.config\.(ts|js|mts|mjs|cts|cjs)$/i.test(basename) ||
+      /^\.stylelintrc(?:\.(js|cjs|json|yaml|yml))?$/i.test(basename) ||
       [
-      "package.json",
-      ".env",
-      ".env.example",
-      "vite.config.ts",
-      "vite.config.js",
-      "angular.json",
-      "webpack.config.js",
-      "next.config.js",
-      "next.config.ts",
-      "docker-compose.yml",
-      "docker-compose.yaml"
+        "package.json",
+        ".env",
+        ".env.example",
+        "vite.config.ts",
+        "vite.config.js",
+        "angular.json",
+        "webpack.config.js",
+        "next.config.js",
+        "next.config.ts",
+        "docker-compose.yml",
+        "docker-compose.yaml"
       ].includes(basename)
     );
   });

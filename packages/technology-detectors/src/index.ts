@@ -217,6 +217,20 @@ function createFrameworkDetection(
   };
 }
 
+function createBuildToolDetection(
+  technology: string,
+  evidence: string[]
+): DetectionResult {
+  return {
+    technology,
+    category:
+      "build-tool",
+    confidence:
+      evidence.length > 1 ? 0.99 : 0.9,
+    evidence
+  };
+}
+
 function detectTestFrameworks(
   context: ScanContext,
   packageJson: PackageJson
@@ -394,6 +408,143 @@ function detectTestFrameworks(
     );
 }
 
+function detectLintTools(
+  context: ScanContext,
+  packageJson: PackageJson
+): DetectionResult[] {
+  const dependencies =
+    getDependencies(packageJson);
+
+  const checks: Array<{
+    technology: string;
+    evidence: string[];
+  }> = [
+    {
+      technology:
+        "ESLint",
+      evidence: [
+        hasDependency(
+          dependencies,
+          ["eslint"]
+        )
+          ? "eslint dependency detected"
+          : undefined,
+        hasConfigFile(
+          context.files,
+          /^eslint\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        ) ||
+        hasConfigFile(
+          context.files,
+          /^\.eslintrc(?:\.(js|cjs|json|yaml|yml))?$/i
+        )
+          ? "eslint config detected"
+          : undefined,
+        scriptIncludes(
+          packageJson,
+          "eslint"
+        )
+          ? "eslint script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      technology:
+        "Biome",
+      evidence: [
+        hasDependency(
+          dependencies,
+          ["@biomejs/biome"]
+        )
+          ? "biome dependency detected"
+          : undefined,
+        hasConfigFile(
+          context.files,
+          /^biome\.jsonc?$/i
+        )
+          ? "biome config detected"
+          : undefined,
+        scriptIncludes(
+          packageJson,
+          "biome"
+        )
+          ? "biome script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      technology:
+        "Prettier",
+      evidence: [
+        hasDependency(
+          dependencies,
+          ["prettier"]
+        )
+          ? "prettier dependency detected"
+          : undefined,
+        hasConfigFile(
+          context.files,
+          /^\.prettierrc(?:\.(js|cjs|mjs|json|yaml|yml|toml))?$/i
+        ) ||
+        hasConfigFile(
+          context.files,
+          /^prettier\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        ) ||
+        hasConfigFile(
+          context.files,
+          /^\.prettierignore$/i
+        )
+          ? "prettier config detected"
+          : undefined,
+        scriptIncludes(
+          packageJson,
+          "prettier"
+        )
+          ? "prettier script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      technology:
+        "Stylelint",
+      evidence: [
+        hasDependency(
+          dependencies,
+          ["stylelint"]
+        )
+          ? "stylelint dependency detected"
+          : undefined,
+        hasConfigFile(
+          context.files,
+          /^stylelint\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        ) ||
+        hasConfigFile(
+          context.files,
+          /^\.stylelintrc(?:\.(js|cjs|json|yaml|yml))?$/i
+        )
+          ? "stylelint config detected"
+          : undefined,
+        scriptIncludes(
+          packageJson,
+          "stylelint"
+        )
+          ? "stylelint script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    }
+  ];
+
+  return checks
+    .filter((check) =>
+      check.evidence.length > 0
+    )
+    .map((check) =>
+      createBuildToolDetection(
+        check.technology,
+        check.evidence
+      )
+    );
+}
+
 function detectInfrastructure(
   context: ScanContext
 ): DetectionResult[] {
@@ -530,6 +681,13 @@ export const universalTechnologyPlugin: ScannerPlugin = {
 
       results.push(
         ...detectTestFrameworks(
+          context,
+          packageJson
+        )
+      );
+
+      results.push(
+        ...detectLintTools(
           context,
           packageJson
         )

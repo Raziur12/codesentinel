@@ -1,0 +1,9 @@
+{
+  "name": "eslint-project",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "echo \"Build passed\"",
+    "test": "echo \"Tests passed\"",
+    "lint": "echo \"ESLint passed\""
+  }
+}
