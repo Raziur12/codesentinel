@@ -7,11 +7,16 @@ import type {
   ScannerPlugin
 } from "@codesentinel/scanner-core";
 
+import {
+  detectPackageManager
+} from "@codesentinel/scanner-core";
+
 interface PackageJson {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   scripts?: Record<string, string>;
   engines?: Record<string, string>;
+  packageManager?: string;
 }
 
 async function readPackageJson(
@@ -274,6 +279,26 @@ export const universalTechnologyPlugin: ScannerPlugin = {
         evidence: [
           "package.json detected"
         ]
+      });
+
+      const packageManager =
+        detectPackageManager(
+          context.files,
+          packageJson
+        );
+
+      results.push({
+        technology:
+          packageManager.name,
+
+        category:
+          "package-manager",
+
+        confidence:
+          packageManager.confidence,
+
+        evidence:
+          packageManager.evidence
       });
 
       if (

@@ -159,6 +159,8 @@ function detectPackageFiles(
     "package-lock.json",
     "yarn.lock",
     "pnpm-lock.yaml",
+    "bun.lock",
+    "bun.lockb",
     "requirements.txt",
     "pyproject.toml",
     "pom.xml",

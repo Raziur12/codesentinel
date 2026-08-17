@@ -3,6 +3,14 @@ import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import {
+  detectPackageManager
+} from "@codesentinel/scanner-core";
+
+import type {
+  PackageManagerName
+} from "@codesentinel/scanner-core";
+
 /**
  * Validation status.
  */
@@ -123,6 +131,17 @@ interface PackageJson {
 
   workspaces?: string[] | {
     packages?: string[];
+  };
+}
+
+interface PackageManagerCommands {
+  install: string[];
+
+  run: (scriptName: string) => string[];
+
+  exec: (binaryName: string, args: string[]) => {
+    command: string;
+    args: string[];
   };
 }
 
@@ -317,19 +336,121 @@ function getWorkspacePatterns(
   return packageJson.workspaces.packages ?? [];
 }
 
-function detectPackageManager(
-  packageJson: PackageJson | null
-): string {
-  const declaredManager =
-    packageJson?.packageManager?.split("@")[0];
+async function getRootFiles(
+  projectPath: string
+): Promise<string[]> {
+  const entries =
+    await fs.readdir(
+      projectPath,
+      {
+        withFileTypes: true
+      }
+    );
 
-  if (
-    declaredManager
+  return entries
+    .filter(
+      entry =>
+        entry.isFile()
+    )
+    .map(
+      entry =>
+        entry.name
+    );
+}
+
+function getPackageManagerCommands(
+  packageManager: PackageManagerName
+): PackageManagerCommands {
+  switch (
+    packageManager
   ) {
-    return declaredManager;
-  }
+    case "yarn":
+      return {
+        install:
+          ["install"],
 
-  return "npm";
+        run:
+          scriptName =>
+            ["run", scriptName],
+
+        exec:
+          (binaryName, args) => ({
+            command:
+              "yarn",
+
+            args: [
+              "exec",
+              binaryName,
+              ...args
+            ]
+          })
+      };
+
+    case "pnpm":
+      return {
+        install:
+          ["install"],
+
+        run:
+          scriptName =>
+            ["run", scriptName],
+
+        exec:
+          (binaryName, args) => ({
+            command:
+              "pnpm",
+
+            args: [
+              "exec",
+              binaryName,
+              ...args
+            ]
+          })
+      };
+
+    case "bun":
+      return {
+        install:
+          ["install"],
+
+        run:
+          scriptName =>
+            ["run", scriptName],
+
+        exec:
+          (binaryName, args) => ({
+            command:
+              "bunx",
+
+            args: [
+              binaryName,
+              ...args
+            ]
+          })
+      };
+
+    case "npm":
+    default:
+      return {
+        install:
+          ["install"],
+
+        run:
+          scriptName =>
+            ["run", scriptName],
+
+        exec:
+          (binaryName, args) => ({
+            command:
+              "npx",
+
+            args: [
+              binaryName,
+              ...args
+            ]
+          })
+      };
+  }
 }
 
 function createCommand(
@@ -468,6 +589,7 @@ async function createScriptCommand(
   category: ValidationCategory,
   priority: number,
   packageManager: string,
+  packageManagerCommands: PackageManagerCommands,
   scriptName: string,
   scripts: Record<string, string> | undefined,
   workspaces: ValidationWorkspace[]
@@ -491,7 +613,9 @@ async function createScriptCommand(
         category,
         priority,
         packageManager,
-        ["run", scriptName],
+        packageManagerCommands.run(
+          scriptName
+        ),
         false,
         `No workspace ${scriptName} script found`
       );
@@ -502,7 +626,9 @@ async function createScriptCommand(
       category,
       priority,
       packageManager,
-      ["run", scriptName]
+      packageManagerCommands.run(
+        scriptName
+      )
     );
   }
 
@@ -511,7 +637,9 @@ async function createScriptCommand(
     category,
     priority,
     packageManager,
-    ["run", scriptName],
+    packageManagerCommands.run(
+      scriptName
+    ),
     false,
     `No ${scriptName} script found`
   );
@@ -554,9 +682,23 @@ export async function discoverValidationPlan(
       projectPath
     );
 
-  const packageManager =
+  const rootFiles =
+    await getRootFiles(
+      projectPath
+    );
+
+  const packageManagerDetection =
     detectPackageManager(
+      rootFiles,
       packageJson
+    );
+
+  const packageManager =
+    packageManagerDetection.name;
+
+  const packageManagerCommands =
+    getPackageManagerCommands(
+      packageManager
     );
 
   const scripts =
@@ -585,17 +727,27 @@ export async function discoverValidationPlan(
           "dependency",
           10,
           packageManager,
-          ["install"]
+          packageManagerCommands.install
         )
       : createCommand(
           "Install dependencies",
           "dependency",
           10,
           packageManager,
-          ["install"],
+          packageManagerCommands.install,
           false,
           "No package.json found"
         );
+
+  const typeCheckExec =
+    packageManagerCommands.exec(
+      "tsc",
+      [
+        "--noEmit",
+        "-p",
+        tsconfig ?? "tsconfig.json"
+      ]
+    );
 
   const typeCheckCommand =
     tsconfig
@@ -603,25 +755,15 @@ export async function discoverValidationPlan(
           "Type Check",
           "type-check",
           50,
-          "npx",
-          [
-            "tsc",
-            "--noEmit",
-            "-p",
-            tsconfig
-          ]
+          typeCheckExec.command,
+          typeCheckExec.args
         )
       : createCommand(
           "Type Check",
           "type-check",
           50,
-          "npx",
-          [
-            "tsc",
-            "--noEmit",
-            "-p",
-            "tsconfig.json"
-          ],
+          typeCheckExec.command,
+          typeCheckExec.args,
           false,
           "No TypeScript config found"
         );
@@ -637,6 +779,7 @@ export async function discoverValidationPlan(
         "build",
         20,
         packageManager,
+        packageManagerCommands,
         "build",
         scripts,
         workspaces
@@ -646,6 +789,7 @@ export async function discoverValidationPlan(
         "test",
         30,
         packageManager,
+        packageManagerCommands,
         "test",
         scripts,
         workspaces
@@ -655,6 +799,7 @@ export async function discoverValidationPlan(
         "lint",
         40,
         packageManager,
+        packageManagerCommands,
         "lint",
         scripts,
         workspaces

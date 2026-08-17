@@ -37,6 +37,22 @@ export interface TechnologyProfile {
   unknown: TechnologyProfileItem[];
 }
 
+export type PackageManagerName =
+  | "npm"
+  | "yarn"
+  | "pnpm"
+  | "bun";
+
+export interface PackageManagerDetection {
+  name: PackageManagerName;
+  confidence: number;
+  evidence: string[];
+}
+
+export interface PackageManagerPackageJson {
+  packageManager?: string;
+}
+
 export interface ScannerPlugin {
   id: string;
   name: string;
@@ -44,6 +60,114 @@ export interface ScannerPlugin {
   detect(
     context: ScanContext
   ): Promise<DetectionResult[]>;
+}
+
+function getDeclaredPackageManager(
+  packageJson: PackageManagerPackageJson | null
+): PackageManagerName | null {
+  const declaredName =
+    packageJson?.packageManager
+      ?.split("@")[0]
+      ?.toLowerCase();
+
+  if (
+    declaredName === "npm" ||
+    declaredName === "yarn" ||
+    declaredName === "pnpm" ||
+    declaredName === "bun"
+  ) {
+    return declaredName;
+  }
+
+  return null;
+}
+
+function hasFile(
+  files: string[],
+  fileName: string
+): boolean {
+  return files.some(
+    file =>
+      file.replace(/\\/g, "/") === fileName
+  );
+}
+
+export function detectPackageManager(
+  files: string[],
+  packageJson: PackageManagerPackageJson | null
+): PackageManagerDetection {
+  const evidence: string[] = [];
+
+  const declaredPackageManager =
+    getDeclaredPackageManager(
+      packageJson
+    );
+
+  if (
+    declaredPackageManager
+  ) {
+    evidence.push(
+      `packageManager field declares ${declaredPackageManager}`
+    );
+  }
+
+  const lockfileManagers:
+    PackageManagerName[] = [];
+
+  if (
+    hasFile(files, "package-lock.json")
+  ) {
+    lockfileManagers.push("npm");
+    evidence.push("package-lock.json detected");
+  }
+
+  if (
+    hasFile(files, "yarn.lock")
+  ) {
+    lockfileManagers.push("yarn");
+    evidence.push("yarn.lock detected");
+  }
+
+  if (
+    hasFile(files, "pnpm-lock.yaml")
+  ) {
+    lockfileManagers.push("pnpm");
+    evidence.push("pnpm-lock.yaml detected");
+  }
+
+  if (
+    hasFile(files, "bun.lock") ||
+    hasFile(files, "bun.lockb")
+  ) {
+    lockfileManagers.push("bun");
+    evidence.push("bun lockfile detected");
+  }
+
+  const name =
+    declaredPackageManager ??
+    lockfileManagers[0] ??
+    "npm";
+
+  const confidence =
+    declaredPackageManager
+      ? 0.99
+      : lockfileManagers.length > 0
+        ? 0.95
+        : 0.5;
+
+  if (
+    evidence.length === 0
+  ) {
+    evidence.push(
+      "No package manager metadata found; defaulting to npm"
+    );
+  }
+
+  return {
+    name,
+    confidence,
+    evidence
+  };
 }
 
 export interface ProjectStructure {
