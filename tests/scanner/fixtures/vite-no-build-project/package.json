@@ -1,0 +1,11 @@
+{
+  "name": "vite-no-build-project",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "echo \"Tests passed\"",
+    "lint": "echo \"Lint passed\""
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}

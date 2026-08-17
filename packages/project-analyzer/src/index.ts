@@ -142,6 +142,7 @@ function detectConfiguration(
       ".env.example",
       "vite.config.ts",
       "vite.config.js",
+      "angular.json",
       "webpack.config.js",
       "next.config.js",
       "next.config.ts",

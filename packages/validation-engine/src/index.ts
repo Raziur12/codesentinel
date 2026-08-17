@@ -60,6 +60,8 @@ export interface ValidationCommand {
   priority: number;
 
   skipReason?: string;
+
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -159,6 +161,25 @@ interface TypeScriptProjectInfo {
   hasTypeScriptFiles: boolean;
 
   shouldTypeCheck: boolean;
+
+  skipReason?: string;
+}
+
+type BuildSystemName =
+  | "vite"
+  | "next"
+  | "angular"
+  | "generic-node"
+  | "unknown";
+
+interface BuildSystemInfo {
+  name: BuildSystemName;
+
+  confidence: number;
+
+  evidence: string[];
+
+  hasBuildScript: boolean;
 
   skipReason?: string;
 }
@@ -542,7 +563,8 @@ function createCommand(
   command: string,
   args: string[],
   available = true,
-  skipReason?: string
+  skipReason?: string,
+  metadata?: Record<string, unknown>
 ): ValidationCommand {
   return {
     name,
@@ -553,7 +575,8 @@ function createCommand(
     available,
     category,
     priority,
-    skipReason
+    skipReason,
+    metadata
   };
 }
 
@@ -666,6 +689,198 @@ function hasWorkspaceScript(
   );
 }
 
+function getDependencies(
+  packageJson: PackageJson | null
+): Set<string> {
+  return new Set([
+    ...Object.keys(packageJson?.dependencies ?? {}),
+    ...Object.keys(packageJson?.devDependencies ?? {})
+  ]);
+}
+
+function hasDependency(
+  dependencies: Set<string>,
+  dependencyName: string
+): boolean {
+  return dependencies.has(
+    dependencyName
+  );
+}
+
+function hasConfigFile(
+  files: string[],
+  pattern: RegExp
+): boolean {
+  return files.some(
+    file =>
+      pattern.test(file)
+  );
+}
+
+function detectBuildSystem(
+  files: string[],
+  packageJson: PackageJson | null
+): BuildSystemInfo {
+  const scripts =
+    packageJson?.scripts;
+
+  const hasBuildScript =
+    Boolean(
+      scripts?.build
+    );
+
+  const dependencies =
+    getDependencies(
+      packageJson
+    );
+
+  const evidence: string[] = [];
+
+  if (
+    hasConfigFile(
+      files,
+      /^vite\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+    )
+  ) {
+    evidence.push(
+      "vite config detected"
+    );
+  }
+
+  if (
+    hasDependency(
+      dependencies,
+      "vite"
+    )
+  ) {
+    evidence.push(
+      "vite dependency detected"
+    );
+  }
+
+  if (
+    evidence.length > 0
+  ) {
+    return {
+      name:
+        "vite",
+      confidence:
+        evidence.length > 1 ? 0.99 : 0.9,
+      evidence,
+      hasBuildScript,
+      skipReason:
+        hasBuildScript
+          ? undefined
+          : "Vite project detected but no build script found"
+    };
+  }
+
+  if (
+    hasConfigFile(
+      files,
+      /^next\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+    )
+  ) {
+    evidence.push(
+      "next config detected"
+    );
+  }
+
+  if (
+    hasDependency(
+      dependencies,
+      "next"
+    )
+  ) {
+    evidence.push(
+      "next dependency detected"
+    );
+  }
+
+  if (
+    evidence.length > 0
+  ) {
+    return {
+      name:
+        "next",
+      confidence:
+        evidence.length > 1 ? 0.99 : 0.9,
+      evidence,
+      hasBuildScript,
+      skipReason:
+        hasBuildScript
+          ? undefined
+          : "Next.js project detected but no build script found"
+    };
+  }
+
+  if (
+    hasConfigFile(
+      files,
+      /^angular\.json$/i
+    )
+  ) {
+    evidence.push(
+      "angular.json detected"
+    );
+  }
+
+  if (
+    hasDependency(
+      dependencies,
+      "@angular/core"
+    )
+  ) {
+    evidence.push(
+      "@angular/core dependency detected"
+    );
+  }
+
+  if (
+    evidence.length > 0
+  ) {
+    return {
+      name:
+        "angular",
+      confidence:
+        evidence.length > 1 ? 0.99 : 0.9,
+      evidence,
+      hasBuildScript,
+      skipReason:
+        hasBuildScript
+          ? undefined
+          : "Angular project detected but no build script found"
+    };
+  }
+
+  if (
+    hasBuildScript
+  ) {
+    return {
+      name:
+        "generic-node",
+      confidence:
+        0.75,
+      evidence:
+        ["package.json build script detected"],
+      hasBuildScript
+    };
+  }
+
+  return {
+    name:
+      "unknown",
+    confidence:
+      0,
+    evidence:
+      [],
+    hasBuildScript:
+      false,
+    skipReason:
+      "No build script found"
+  };
+}
+
 async function createScriptCommand(
   name: string,
   category: ValidationCategory,
@@ -724,6 +939,34 @@ async function createScriptCommand(
     ),
     false,
     `No ${scriptName} script found`
+  );
+}
+
+function createBuildCommand(
+  packageManager: string,
+  packageManagerCommands: PackageManagerCommands,
+  buildSystem: BuildSystemInfo
+): ValidationCommand {
+  return createCommand(
+    "Build",
+    "build",
+    20,
+    packageManager,
+    packageManagerCommands.run(
+      "build"
+    ),
+    buildSystem.hasBuildScript,
+    buildSystem.hasBuildScript
+      ? undefined
+      : buildSystem.skipReason ?? "No build script found",
+    {
+      buildSystem:
+        buildSystem.name,
+      confidence:
+        buildSystem.confidence,
+      evidence:
+        buildSystem.evidence
+    }
   );
 }
 
@@ -907,6 +1150,12 @@ export async function discoverValidationPlan(
       packageJson
     );
 
+  const buildSystem =
+    detectBuildSystem(
+      projectFiles,
+      packageJson
+    );
+
   const installCommand =
     packageJson
       ? createCommand(
@@ -963,15 +1212,10 @@ export async function discoverValidationPlan(
     workspaces,
     commands: [
       installCommand,
-      await createScriptCommand(
-        "Build",
-        "build",
-        20,
+      createBuildCommand(
         packageManager,
         packageManagerCommands,
-        "build",
-        scripts,
-        workspaces
+        buildSystem
       ),
       await createScriptCommand(
         "Test",

@@ -1,0 +1,12 @@
+{
+  "name": "angular-project",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "echo \"Angular build passed\"",
+    "test": "echo \"Tests passed\"",
+    "lint": "echo \"Lint passed\""
+  },
+  "dependencies": {
+    "@angular/core": "^18.0.0"
+  }
+}

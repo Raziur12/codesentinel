@@ -1,0 +1,12 @@
+{
+  "name": "next-project",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "echo \"Next build passed\"",
+    "test": "echo \"Tests passed\"",
+    "lint": "echo \"Lint passed\""
+  },
+  "dependencies": {
+    "next": "^15.0.0"
+  }
+}
