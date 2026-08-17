@@ -134,9 +134,19 @@ function detectTests(
 function detectConfiguration(
   files: string[]
 ): string[] {
-  return files.filter(file =>
-    /^tsconfig(?:\..+)?\.json$/i.test(path.basename(file)) ||
-    [
+  return files.filter(file => {
+    const basename =
+      path.basename(file);
+
+    return (
+      /^tsconfig(?:\..+)?\.json$/i.test(basename) ||
+      /^jest\.config\.(ts|js|mts|mjs|cts|cjs|json)$/i.test(basename) ||
+      /^vitest\.config\.(ts|js|mts|mjs|cts|cjs)$/i.test(basename) ||
+      /^playwright\.config\.(ts|js|mts|mjs|cts|cjs)$/i.test(basename) ||
+      /^cypress\.config\.(ts|js|mts|mjs|cts|cjs)$/i.test(basename) ||
+      /^\.mocharc(?:\.(js|cjs|json|yaml|yml))?$/i.test(basename) ||
+      /^jasmine\.(json|js)$/i.test(basename) ||
+      [
       "package.json",
       ".env",
       ".env.example",
@@ -148,8 +158,9 @@ function detectConfiguration(
       "next.config.ts",
       "docker-compose.yml",
       "docker-compose.yaml"
-    ].includes(path.basename(file))
-  );
+      ].includes(basename)
+    );
+  });
 }
 
 function detectPackageFiles(

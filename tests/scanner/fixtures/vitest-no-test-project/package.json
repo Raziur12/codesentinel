@@ -1,0 +1,8 @@
+{
+  "name": "vitest-no-test-project",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "echo \"Build passed\"",
+    "lint": "echo \"Lint passed\""
+  }
+}

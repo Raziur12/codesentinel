@@ -184,6 +184,28 @@ interface BuildSystemInfo {
   skipReason?: string;
 }
 
+type TestFrameworkName =
+  | "jest"
+  | "vitest"
+  | "mocha"
+  | "cypress"
+  | "playwright"
+  | "jasmine"
+  | "generic-node"
+  | "unknown";
+
+interface TestFrameworkInfo {
+  name: TestFrameworkName;
+
+  confidence: number;
+
+  evidence: string[];
+
+  hasTestScript: boolean;
+
+  skipReason?: string;
+}
+
 export interface ValidationWorkspace {
   name?: string;
 
@@ -881,6 +903,230 @@ function detectBuildSystem(
   };
 }
 
+function createTestFrameworkInfo(
+  name: Exclude<TestFrameworkName, "generic-node" | "unknown">,
+  label: string,
+  evidence: string[],
+  hasTestScript: boolean
+): TestFrameworkInfo {
+  return {
+    name,
+    confidence:
+      evidence.length > 1 ? 0.99 : 0.9,
+    evidence,
+    hasTestScript,
+    skipReason:
+      hasTestScript
+        ? undefined
+        : `${label} project detected but no test script found`
+  };
+}
+
+function detectTestFramework(
+  files: string[],
+  packageJson: PackageJson | null
+): TestFrameworkInfo {
+  const scripts =
+    packageJson?.scripts;
+
+  const hasTestScript =
+    Boolean(
+      scripts?.test
+    );
+
+  const dependencies =
+    getDependencies(
+      packageJson
+    );
+
+  const frameworkChecks: Array<{
+    name: Exclude<TestFrameworkName, "generic-node" | "unknown">;
+    label: string;
+    evidence: string[];
+  }> = [
+    {
+      name:
+        "vitest",
+      label:
+        "Vitest",
+      evidence: [
+        hasConfigFile(
+          files,
+          /^vitest\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        )
+          ? "vitest config detected"
+          : undefined,
+        hasDependency(
+          dependencies,
+          "vitest"
+        )
+          ? "vitest dependency detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      name:
+        "jest",
+      label:
+        "Jest",
+      evidence: [
+        hasConfigFile(
+          files,
+          /^jest\.config\.(ts|js|mts|mjs|cts|cjs|json)$/i
+        )
+          ? "jest config detected"
+          : undefined,
+        hasDependency(
+          dependencies,
+          "jest"
+        )
+          ? "jest dependency detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      name:
+        "playwright",
+      label:
+        "Playwright",
+      evidence: [
+        hasConfigFile(
+          files,
+          /^playwright\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        )
+          ? "playwright config detected"
+          : undefined,
+        hasDependency(
+          dependencies,
+          "@playwright/test"
+        ) ||
+        hasDependency(
+          dependencies,
+          "playwright"
+        )
+          ? "playwright dependency detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      name:
+        "cypress",
+      label:
+        "Cypress",
+      evidence: [
+        hasConfigFile(
+          files,
+          /^cypress\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        )
+          ? "cypress config detected"
+          : undefined,
+        hasDependency(
+          dependencies,
+          "cypress"
+        )
+          ? "cypress dependency detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      name:
+        "mocha",
+      label:
+        "Mocha",
+      evidence: [
+        hasConfigFile(
+          files,
+          /^\.mocharc(?:\.(js|cjs|json|yaml|yml))?$/i
+        ) ||
+        hasConfigFile(
+          files,
+          /^mocha\.opts$/i
+        )
+          ? "mocha config detected"
+          : undefined,
+        hasDependency(
+          dependencies,
+          "mocha"
+        )
+          ? "mocha dependency detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      name:
+        "jasmine",
+      label:
+        "Jasmine",
+      evidence: [
+        hasConfigFile(
+          files,
+          /^jasmine\.(json|js)$/i
+        ) ||
+        hasConfigFile(
+          files,
+          /^spec\/support\/jasmine\.json$/i
+        )
+          ? "jasmine config detected"
+          : undefined,
+        hasDependency(
+          dependencies,
+          "jasmine"
+        ) ||
+        hasDependency(
+          dependencies,
+          "jasmine-core"
+        )
+          ? "jasmine dependency detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    }
+  ];
+
+  const detectedFramework =
+    frameworkChecks.find(
+      framework =>
+        framework.evidence.length > 0
+    );
+
+  if (
+    detectedFramework
+  ) {
+    return createTestFrameworkInfo(
+      detectedFramework.name,
+      detectedFramework.label,
+      detectedFramework.evidence,
+      hasTestScript
+    );
+  }
+
+  if (
+    hasTestScript
+  ) {
+    return {
+      name:
+        "generic-node",
+      confidence:
+        0.75,
+      evidence:
+        ["package.json test script detected"],
+      hasTestScript
+    };
+  }
+
+  return {
+    name:
+      "unknown",
+    confidence:
+      0,
+    evidence:
+      [],
+    hasTestScript:
+      false,
+    skipReason:
+      "No test script found"
+  };
+}
+
 async function createScriptCommand(
   name: string,
   category: ValidationCategory,
@@ -966,6 +1212,34 @@ function createBuildCommand(
         buildSystem.confidence,
       evidence:
         buildSystem.evidence
+    }
+  );
+}
+
+function createTestCommand(
+  packageManager: string,
+  packageManagerCommands: PackageManagerCommands,
+  testFramework: TestFrameworkInfo
+): ValidationCommand {
+  return createCommand(
+    "Test",
+    "test",
+    30,
+    packageManager,
+    packageManagerCommands.run(
+      "test"
+    ),
+    testFramework.hasTestScript,
+    testFramework.hasTestScript
+      ? undefined
+      : testFramework.skipReason ?? "No test script found",
+    {
+      testFramework:
+        testFramework.name,
+      confidence:
+        testFramework.confidence,
+      evidence:
+        testFramework.evidence
     }
   );
 }
@@ -1156,6 +1430,12 @@ export async function discoverValidationPlan(
       packageJson
     );
 
+  const testFramework =
+    detectTestFramework(
+      projectFiles,
+      packageJson
+    );
+
   const installCommand =
     packageJson
       ? createCommand(
@@ -1217,15 +1497,10 @@ export async function discoverValidationPlan(
         packageManagerCommands,
         buildSystem
       ),
-      await createScriptCommand(
-        "Test",
-        "test",
-        30,
+      createTestCommand(
         packageManager,
         packageManagerCommands,
-        "test",
-        scripts,
-        workspaces
+        testFramework
       ),
       await createScriptCommand(
         "Lint",

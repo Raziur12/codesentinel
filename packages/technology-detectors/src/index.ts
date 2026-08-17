@@ -61,6 +61,26 @@ function hasDependency(
   );
 }
 
+function hasConfigFile(
+  files: string[],
+  pattern: RegExp
+): boolean {
+  return files.some((file) =>
+    pattern.test(path.basename(file)) ||
+    pattern.test(file)
+  );
+}
+
+function scriptIncludes(
+  packageJson: PackageJson,
+  token: string
+): boolean {
+  return Object.values(packageJson.scripts ?? {}).some(
+    (script) =>
+      new RegExp(`(^|\\s)${token}(\\s|$)`, "i").test(script)
+  );
+}
+
 function detectLanguages(
   context: ScanContext
 ): DetectionResult[] {
@@ -181,6 +201,197 @@ function detectLanguages(
   }
 
   return results;
+}
+
+function createFrameworkDetection(
+  technology: string,
+  evidence: string[]
+): DetectionResult {
+  return {
+    technology,
+    category:
+      "framework",
+    confidence:
+      evidence.length > 1 ? 0.99 : 0.9,
+    evidence
+  };
+}
+
+function detectTestFrameworks(
+  context: ScanContext,
+  packageJson: PackageJson
+): DetectionResult[] {
+  const dependencies =
+    getDependencies(packageJson);
+
+  const checks: Array<{
+    technology: string;
+    evidence: string[];
+  }> = [
+    {
+      technology:
+        "Jest",
+      evidence: [
+        hasDependency(
+          dependencies,
+          ["jest"]
+        )
+          ? "jest dependency detected"
+          : undefined,
+        hasConfigFile(
+          context.files,
+          /^jest\.config\.(ts|js|mts|mjs|cts|cjs|json)$/i
+        )
+          ? "jest config detected"
+          : undefined,
+        scriptIncludes(
+          packageJson,
+          "jest"
+        )
+          ? "jest script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      technology:
+        "Vitest",
+      evidence: [
+        hasDependency(
+          dependencies,
+          ["vitest"]
+        )
+          ? "vitest dependency detected"
+          : undefined,
+        hasConfigFile(
+          context.files,
+          /^vitest\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        )
+          ? "vitest config detected"
+          : undefined,
+        scriptIncludes(
+          packageJson,
+          "vitest"
+        )
+          ? "vitest script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      technology:
+        "Mocha",
+      evidence: [
+        hasDependency(
+          dependencies,
+          ["mocha"]
+        )
+          ? "mocha dependency detected"
+          : undefined,
+        hasConfigFile(
+          context.files,
+          /^\.mocharc(?:\.(js|cjs|json|yaml|yml))?$/i
+        ) ||
+        hasConfigFile(
+          context.files,
+          /^mocha\.opts$/i
+        )
+          ? "mocha config detected"
+          : undefined,
+        scriptIncludes(
+          packageJson,
+          "mocha"
+        )
+          ? "mocha script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      technology:
+        "Cypress",
+      evidence: [
+        hasDependency(
+          dependencies,
+          ["cypress"]
+        )
+          ? "cypress dependency detected"
+          : undefined,
+        hasConfigFile(
+          context.files,
+          /^cypress\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        )
+          ? "cypress config detected"
+          : undefined,
+        scriptIncludes(
+          packageJson,
+          "cypress"
+        )
+          ? "cypress script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      technology:
+        "Playwright",
+      evidence: [
+        hasDependency(
+          dependencies,
+          ["@playwright/test", "playwright"]
+        )
+          ? "playwright dependency detected"
+          : undefined,
+        hasConfigFile(
+          context.files,
+          /^playwright\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+        )
+          ? "playwright config detected"
+          : undefined,
+        scriptIncludes(
+          packageJson,
+          "playwright"
+        )
+          ? "playwright script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    },
+    {
+      technology:
+        "Jasmine",
+      evidence: [
+        hasDependency(
+          dependencies,
+          ["jasmine", "jasmine-core"]
+        )
+          ? "jasmine dependency detected"
+          : undefined,
+        hasConfigFile(
+          context.files,
+          /^jasmine\.(json|js)$/i
+        ) ||
+        hasConfigFile(
+          context.files,
+          /^spec\/support\/jasmine\.json$/i
+        )
+          ? "jasmine config detected"
+          : undefined,
+        scriptIncludes(
+          packageJson,
+          "jasmine"
+        )
+          ? "jasmine script detected"
+          : undefined
+      ].filter(Boolean) as string[]
+    }
+  ];
+
+  return checks
+    .filter((check) =>
+      check.evidence.length > 0
+    )
+    .map((check) =>
+      createFrameworkDetection(
+        check.technology,
+        check.evidence
+      )
+    );
 }
 
 function detectInfrastructure(
@@ -316,6 +527,13 @@ export const universalTechnologyPlugin: ScannerPlugin = {
           ]
         });
       }
+
+      results.push(
+        ...detectTestFrameworks(
+          context,
+          packageJson
+        )
+      );
 
       if (
         hasDependency(
