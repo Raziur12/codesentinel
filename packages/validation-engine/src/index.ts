@@ -127,6 +127,10 @@ interface PackageJson {
 
   scripts?: Record<string, string>;
 
+  dependencies?: Record<string, string>;
+
+  devDependencies?: Record<string, string>;
+
   packageManager?: string;
 
   workspaces?: string[] | {
@@ -143,6 +147,20 @@ interface PackageManagerCommands {
     command: string;
     args: string[];
   };
+}
+
+interface TypeScriptProjectInfo {
+  configFiles: string[];
+
+  selectedConfig?: string;
+
+  hasTypeScriptDependency: boolean;
+
+  hasTypeScriptFiles: boolean;
+
+  shouldTypeCheck: boolean;
+
+  skipReason?: string;
 }
 
 export interface ValidationWorkspace {
@@ -356,6 +374,70 @@ async function getRootFiles(
       entry =>
         entry.name
     );
+}
+
+async function getProjectFiles(
+  directory: string,
+  root = directory
+): Promise<string[]> {
+  const entries =
+    await fs.readdir(
+      directory,
+      {
+        withFileTypes: true
+      }
+    );
+
+  const files: string[] = [];
+
+  for (
+    const entry
+    of entries
+  ) {
+    const fullPath =
+      path.join(
+        directory,
+        entry.name
+      );
+
+    if (
+      entry.isDirectory()
+    ) {
+      if (
+        [
+          "node_modules",
+          ".git",
+          "dist",
+          "build",
+          ".next",
+          ".codesentinel",
+          "coverage"
+        ].includes(entry.name)
+      ) {
+        continue;
+      }
+
+      files.push(
+        ...(await getProjectFiles(
+          fullPath,
+          root
+        ))
+      );
+
+      continue;
+    }
+
+    files.push(
+      path
+        .relative(
+          root,
+          fullPath
+        )
+        .replace(/\\/g, "/")
+    );
+  }
+
+  return files;
 }
 
 function getPackageManagerCommands(
@@ -645,33 +727,132 @@ async function createScriptCommand(
   );
 }
 
-async function findTypeScriptConfig(
-  projectPath: string
-): Promise<string | null> {
-  const entries =
-    await fs.readdir(
-      projectPath,
-      {
-        withFileTypes: true
-      }
+function hasTypeScriptDependency(
+  packageJson: PackageJson | null
+): boolean {
+  return Boolean(
+    packageJson?.dependencies?.typescript ||
+    packageJson?.devDependencies?.typescript
+  );
+}
+
+function hasTypeScriptFiles(
+  files: string[]
+): boolean {
+  return files.some(
+    file =>
+      /\.(ts|tsx)$/i.test(file) &&
+      !/\.d\.ts$/i.test(file)
+  );
+}
+
+function getTypeScriptConfigPriority(
+  configFile: string
+): number {
+  const normalizedConfig =
+    configFile.toLowerCase();
+
+  if (
+    normalizedConfig === "tsconfig.json"
+  ) {
+    return 0;
+  }
+
+  if (
+    normalizedConfig === "tsconfig.app.json"
+  ) {
+    return 1;
+  }
+
+  if (
+    normalizedConfig === "tsconfig.build.json"
+  ) {
+    return 2;
+  }
+
+  return 10;
+}
+
+function detectTypeScriptProject(
+  files: string[],
+  packageJson: PackageJson | null
+): TypeScriptProjectInfo {
+  const configFiles =
+    files
+      .filter(
+        file =>
+          !file.includes("/") &&
+          /^tsconfig(?:\..+)?\.json$/i.test(file)
+      )
+      .sort(
+        (left, right) =>
+          getTypeScriptConfigPriority(left) -
+            getTypeScriptConfigPriority(right) ||
+          left.localeCompare(right)
+      );
+
+  const selectedConfig =
+    configFiles[0];
+
+  const typeScriptDependency =
+    hasTypeScriptDependency(
+      packageJson
     );
 
-  const configNames =
-    entries
-      .filter(
-        entry =>
-          entry.isFile() &&
-          /^tsconfig(?:\..+)?\.json$/i.test(
-            entry.name
-          )
-      )
-      .map(
-        entry =>
-          entry.name
-      )
-      .sort();
+  const typeScriptFiles =
+    hasTypeScriptFiles(
+      files
+    );
 
-  return configNames[0] ?? null;
+  const hasTypeScriptEvidence =
+    typeScriptDependency ||
+    typeScriptFiles ||
+    configFiles.length > 0;
+
+  if (
+    !hasTypeScriptEvidence
+  ) {
+    return {
+      configFiles,
+      selectedConfig,
+      hasTypeScriptDependency:
+        typeScriptDependency,
+      hasTypeScriptFiles:
+        typeScriptFiles,
+      shouldTypeCheck:
+        false,
+      skipReason:
+        "No TypeScript files, dependency, or config found"
+    };
+  }
+
+  if (
+    !selectedConfig
+  ) {
+    return {
+      configFiles,
+      selectedConfig,
+      hasTypeScriptDependency:
+        typeScriptDependency,
+      hasTypeScriptFiles:
+        typeScriptFiles,
+      shouldTypeCheck:
+        false,
+      skipReason:
+        "No TypeScript config found"
+    };
+  }
+
+  return {
+    configFiles,
+    selectedConfig,
+    hasTypeScriptDependency:
+      typeScriptDependency,
+    hasTypeScriptFiles:
+      typeScriptFiles,
+    shouldTypeCheck:
+      true
+  };
 }
 
 export async function discoverValidationPlan(
@@ -684,6 +865,11 @@ export async function discoverValidationPlan(
 
   const rootFiles =
     await getRootFiles(
+      projectPath
+    );
+
+  const projectFiles =
+    await getProjectFiles(
       projectPath
     );
 
@@ -715,9 +901,10 @@ export async function discoverValidationPlan(
       workspacePatterns
     );
 
-  const tsconfig =
-    await findTypeScriptConfig(
-      projectPath
+  const typeScriptProject =
+    detectTypeScriptProject(
+      projectFiles,
+      packageJson
     );
 
   const installCommand =
@@ -745,12 +932,13 @@ export async function discoverValidationPlan(
       [
         "--noEmit",
         "-p",
-        tsconfig ?? "tsconfig.json"
+        typeScriptProject.selectedConfig ?? "tsconfig.json"
       ]
     );
 
   const typeCheckCommand =
-    tsconfig
+    typeScriptProject.shouldTypeCheck &&
+    typeScriptProject.selectedConfig
       ? createCommand(
           "Type Check",
           "type-check",
@@ -765,7 +953,8 @@ export async function discoverValidationPlan(
           typeCheckExec.command,
           typeCheckExec.args,
           false,
-          "No TypeScript config found"
+          typeScriptProject.skipReason ??
+            "TypeScript type check is not applicable"
         );
 
   return {

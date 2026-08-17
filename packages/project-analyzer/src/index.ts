@@ -135,9 +135,9 @@ function detectConfiguration(
   files: string[]
 ): string[] {
   return files.filter(file =>
+    /^tsconfig(?:\..+)?\.json$/i.test(path.basename(file)) ||
     [
       "package.json",
-      "tsconfig.json",
       ".env",
       ".env.example",
       "vite.config.ts",
