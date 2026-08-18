@@ -73,6 +73,12 @@ export interface LoadedCodeSentinelConfig {
   config: CodeSentinelConfig;
 }
 
+export interface LoadedCodeSentinelIgnore {
+  path?: string;
+
+  patterns: string[];
+}
+
 /**
  * Validation command definition.
  */
@@ -134,6 +140,10 @@ export interface ValidationResult {
   findings?: ValidationFinding[];
 
   warnings?: ValidationFinding[];
+
+  ignoredFindings?: ValidationFinding[];
+
+  ignoredWarnings?: ValidationFinding[];
 
   skipReason?: string;
 }
@@ -276,11 +286,17 @@ export interface ValidationReport {
 
   configuration?: LoadedCodeSentinelConfig;
 
+  ignore?: LoadedCodeSentinelIgnore;
+
   results: ValidationResult[];
 
   findings: ValidationFinding[];
 
   warnings: ValidationFinding[];
+
+  ignoredFindings: ValidationFinding[];
+
+  ignoredWarnings: ValidationFinding[];
 
   passed: boolean;
 
@@ -546,6 +562,56 @@ async function readCodeSentinelConfig(
   }
 
   return undefined;
+}
+
+function normalizeIgnorePatterns(
+  content: string
+): string[] {
+  return content
+    .split(/\r?\n/)
+    .map(
+      line =>
+        line.trim()
+    )
+    .filter(
+      line =>
+        line.length > 0 &&
+        !line.startsWith("#")
+    );
+}
+
+async function readCodeSentinelIgnore(
+  projectPath: string
+): Promise<LoadedCodeSentinelIgnore | undefined> {
+  const relativePath =
+    ".codesentinelignore";
+
+  const ignorePath =
+    path.join(
+      projectPath,
+      relativePath
+    );
+
+  if (
+    !(await fileExists(ignorePath))
+  ) {
+    return undefined;
+  }
+
+  const content =
+    await fs.readFile(
+      ignorePath,
+      "utf8"
+    );
+
+  return {
+    path:
+      relativePath,
+    patterns:
+      normalizeIgnorePatterns(
+        content
+      )
+  };
 }
 
 function getWorkspacePatterns(
@@ -836,6 +902,217 @@ function applyValidationConfig(
       };
     }
   );
+}
+
+function normalizeFindingPath(
+  value: string
+): string {
+  return value
+    .replace(
+      /\\/g,
+      "/"
+    )
+    .toLowerCase();
+}
+
+function wildcardPatternToRegExp(
+  pattern: string
+): RegExp {
+  const escaped =
+    pattern.replace(
+      /[.+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
+  return new RegExp(
+    `^${escaped.replace(/\*/g, ".*")}$`,
+    "i"
+  );
+}
+
+function patternMatchesPath(
+  pattern: string,
+  file: string | undefined
+): boolean {
+  if (
+    !file
+  ) {
+    return false;
+  }
+
+  const normalizedPattern =
+    normalizeFindingPath(
+      pattern
+    );
+
+  const normalizedFile =
+    normalizeFindingPath(
+      file
+    );
+
+  if (
+    normalizedPattern.includes("*")
+  ) {
+    return wildcardPatternToRegExp(
+      normalizedPattern
+    ).test(
+      normalizedFile
+    );
+  }
+
+  return (
+    normalizedFile === normalizedPattern ||
+    normalizedFile.startsWith(
+      `${normalizedPattern}/`
+    ) ||
+    normalizedFile.includes(
+      `/${normalizedPattern}/`
+    ) ||
+    normalizedFile.endsWith(
+      `/${normalizedPattern}`
+    )
+  );
+}
+
+function getFindingRuleId(
+  finding: ValidationFinding
+): string | undefined {
+  const ruleId =
+    finding.metadata?.ruleId;
+
+  return typeof ruleId === "string"
+    ? ruleId
+    : undefined;
+}
+
+function shouldIgnoreFinding(
+  finding: ValidationFinding,
+  patterns: string[]
+): boolean {
+  return patterns.some(
+    pattern => {
+      const normalizedPattern =
+        pattern.trim();
+
+      if (
+        normalizedPattern.length === 0
+      ) {
+        return false;
+      }
+
+      return (
+        finding.code === normalizedPattern ||
+        getFindingRuleId(finding) === normalizedPattern ||
+        finding.key === normalizedPattern ||
+        patternMatchesPath(
+          normalizedPattern,
+          finding.file
+        )
+      );
+    }
+  );
+}
+
+function splitIgnoredFindings(
+  findings: ValidationFinding[] | undefined,
+  patterns: string[]
+): {
+  active: ValidationFinding[];
+  ignored: ValidationFinding[];
+} {
+  const active: ValidationFinding[] = [];
+
+  const ignored: ValidationFinding[] = [];
+
+  for (
+    const finding
+    of findings ?? []
+  ) {
+    if (
+      shouldIgnoreFinding(
+        finding,
+        patterns
+      )
+    ) {
+      ignored.push(
+        finding
+      );
+      continue;
+    }
+
+    active.push(
+      finding
+    );
+  }
+
+  return {
+    active,
+    ignored
+  };
+}
+
+function applyIgnorePatternsToResult(
+  result: ValidationResult,
+  patterns: string[]
+): void {
+  if (
+    patterns.length === 0
+  ) {
+    return;
+  }
+
+  const findings =
+    splitIgnoredFindings(
+      result.findings,
+      patterns
+    );
+
+  const warnings =
+    splitIgnoredFindings(
+      result.warnings,
+      patterns
+    );
+
+  result.findings =
+    findings.active;
+
+  result.warnings =
+    warnings.active;
+
+  result.ignoredFindings =
+    findings.ignored;
+
+  result.ignoredWarnings =
+    warnings.ignored;
+
+  if (
+    result.status === "failed" &&
+    result.findings.length === 0
+  ) {
+    result.status =
+      result.warnings.length > 0
+        ? "warning"
+        : "passed";
+  }
+
+  if (
+    result.status === "warning" &&
+    result.warnings.length === 0
+  ) {
+    result.status =
+      "passed";
+  }
+}
+
+function getIgnorePatterns(
+  configuration: LoadedCodeSentinelConfig | undefined,
+  ignoreFile: LoadedCodeSentinelIgnore | undefined
+): string[] {
+  return [
+    ...(configuration?.config.ignore ?? []),
+    ...(configuration?.config.exclude ?? []),
+    ...(ignoreFile?.patterns ?? [])
+  ];
 }
 
 type ValidationFindingInput =
@@ -3096,6 +3373,23 @@ export async function validateProject(
   const warnings:
     ValidationFinding[] = [];
 
+  const ignoredFindings:
+    ValidationFinding[] = [];
+
+  const ignoredWarnings:
+    ValidationFinding[] = [];
+
+  const ignoreFile =
+    await readCodeSentinelIgnore(
+      projectPath
+    );
+
+  const ignorePatterns =
+    getIgnorePatterns(
+      configuration,
+      ignoreFile
+    );
+
   /**
    * Run every validation command.
    */
@@ -3138,6 +3432,11 @@ export async function validateProject(
         validationCommand
       );
 
+    applyIgnorePatternsToResult(
+      result,
+      ignorePatterns
+    );
+
     /**
      * Store result.
      */
@@ -3178,6 +3477,24 @@ export async function validateProject(
     ) {
       console.log(
         `✅ ${result.name}`
+      );
+    }
+
+    if (
+      result.ignoredFindings &&
+      result.ignoredFindings.length > 0
+    ) {
+      ignoredFindings.push(
+        ...result.ignoredFindings
+      );
+    }
+
+    if (
+      result.ignoredWarnings &&
+      result.ignoredWarnings.length > 0
+    ) {
+      ignoredWarnings.push(
+        ...result.ignoredWarnings
       );
     }
 
@@ -3355,6 +3672,16 @@ export async function validateProject(
       warnings
     );
 
+  const uniqueIgnoredFindings =
+    deduplicateFindings(
+      ignoredFindings
+    );
+
+  const uniqueIgnoredWarnings =
+    deduplicateFindings(
+      ignoredWarnings
+    );
+
   /**
    * Project is valid only when
    * there are no validation findings.
@@ -3373,6 +3700,9 @@ export async function validateProject(
 
     configuration,
 
+    ignore:
+      ignoreFile,
+
     results,
 
     findings:
@@ -3380,6 +3710,12 @@ export async function validateProject(
 
     warnings:
       uniqueWarnings,
+
+    ignoredFindings:
+      uniqueIgnoredFindings,
+
+    ignoredWarnings:
+      uniqueIgnoredWarnings,
 
     passed,
 

@@ -1,0 +1,12 @@
+{
+  "name": "ignored-finding-project",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"Tests passed\"",
+    "lint": "echo \"Lint passed\""
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}

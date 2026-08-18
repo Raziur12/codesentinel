@@ -157,6 +157,7 @@ function detectConfiguration(
       [
         "package.json",
         ".codesentinel.json",
+        ".codesentinelignore",
         ".env",
         ".env.example",
         "vite.config.ts",

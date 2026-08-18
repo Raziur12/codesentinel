@@ -1,0 +1,2 @@
+# Suppress type mismatch findings for this fixture.
+TS2322
