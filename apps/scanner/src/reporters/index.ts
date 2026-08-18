@@ -82,9 +82,25 @@ export class ConsoleReporter {
   complete(
     execution: ScanExecution
   ): void {
+    const summary =
+      execution.result.validation;
+
     console.log(
-      `Summary: ${execution.result.validation?.passed ? "passed" : "failed"}`
+      `Summary: ${summary?.passed ? "passed" : "failed"}`
     );
+
+    if (
+      summary
+    ) {
+      console.log(
+        [
+          `Passed: ${summary.passedCount}`,
+          `Failed: ${summary.failedCount}`,
+          `Warnings: ${summary.warningCount}`,
+          `Skipped: ${summary.skippedCount}`
+        ].join(" | ")
+      );
+    }
   }
 }
 

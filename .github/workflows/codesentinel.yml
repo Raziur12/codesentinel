@@ -1,0 +1,40 @@
+name: CodeSentinel
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      project_path:
+        description: Project path to scan
+        required: false
+        default: .
+
+jobs:
+  scan:
+    name: CodeSentinel scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build scanner
+        run: npm run scanner:build
+
+      - name: Run CodeSentinel
+        env:
+          PROJECT_PATH: ${{ github.event.inputs.project_path || '.' }}
+        run: node apps/scanner/dist/index.js "$PROJECT_PATH" --format text
