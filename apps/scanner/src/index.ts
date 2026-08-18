@@ -6,10 +6,6 @@ import {
   validateProject
 } from "@codesentinel/validation-engine";
 
-import type {
-  ValidationReport
-} from "@codesentinel/validation-engine";
-
 import {
   analyzeProject
 } from "@codesentinel/project-analyzer";
@@ -34,46 +30,21 @@ import {
   resolveWorkspaceProjectPath
 } from "./path-resolver.js";
 
+import {
+  ConsoleReporter,
+  JsonReporter
+} from "./reporters/index.js";
+
+import type {
+  ScanExecution
+} from "./reporters/index.js";
+
 interface CliOptions {
   inputPath: string;
 
   workspacePath?: string;
 
   format: "text" | "json";
-}
-
-interface ScanExecution {
-  result: ScanResult;
-
-  validationReport: ValidationReport;
-}
-
-interface JsonScanOutput {
-  scan: {
-    metadata: {
-      schemaVersion: string;
-
-      generatedAt: string;
-
-      format: "json";
-    };
-
-    project: {
-      path: string;
-
-      filesScanned: number;
-
-      structure: ScanResult["projectStructure"];
-    };
-
-    technologyProfile: ScanResult["technologyProfile"];
-
-    validation: ValidationReport;
-
-    findings: ValidationReport["findings"];
-
-    summary: NonNullable<ScanResult["validation"]>;
-  };
 }
 
 const EXIT_VALIDATION_PASSED =
@@ -464,52 +435,6 @@ async function scanProject(
   };
 }
 
-function createJsonOutput(
-  execution: ScanExecution
-): JsonScanOutput {
-  return {
-    scan: {
-      metadata: {
-        schemaVersion:
-          "1.0.0",
-        generatedAt:
-          execution.result.completedAt,
-        format:
-          "json"
-      },
-      project: {
-        path:
-          execution.result.projectPath,
-        filesScanned:
-          execution.result.filesScanned,
-        structure:
-          execution.result.projectStructure
-      },
-      technologyProfile:
-        execution.result.technologyProfile,
-      validation:
-        execution.validationReport,
-      findings:
-        execution.validationReport.findings,
-      summary:
-        execution.result.validation ?? {
-          passed:
-            false,
-          total:
-            0,
-          passedCount:
-            0,
-          failedCount:
-            0,
-          warningCount:
-            0,
-          skippedCount:
-            0
-        }
-    }
-  };
-}
-
 async function withConsoleSilenced<T>(
   callback: () => Promise<T>
 ): Promise<T> {
@@ -601,6 +526,9 @@ async function main(): Promise<number> {
   if (
     cliOptions.format === "json"
   ) {
+    const reporter =
+      new JsonReporter();
+
     const execution =
       await withConsoleSilenced(
         () =>
@@ -612,14 +540,8 @@ async function main(): Promise<number> {
           )
       );
 
-    console.log(
-      JSON.stringify(
-        createJsonOutput(
-          execution
-        ),
-        null,
-        2
-      )
+    reporter.write(
+      execution
     );
 
     return getValidationExitCode(
@@ -628,31 +550,16 @@ async function main(): Promise<number> {
   }
 
 
-  console.log(
-    "🔎 CodeSentinel Scanner"
-  );
 
-  console.log(
-    "======================"
-  );
+  const reporter =
+    new ConsoleReporter();
 
-  console.log(
-    `Input: ${displayInput}`
-  );
-
-  if (
-    relativeWorkspacePath
-  ) {
-    console.log(
-      `Workspace: ${relativeWorkspacePath}`
-    );
-  }
-
-  console.log(
-    `Resolved Project: ${projectPath}`
-  );
-
-  console.log("");
+  reporter.start({
+    displayInput,
+    projectPath,
+    workspacePath:
+      relativeWorkspacePath
+  });
 
 
   const execution =
@@ -663,11 +570,8 @@ async function main(): Promise<number> {
       ]
     );
 
-  const result =
-    execution.result;
-
-  console.log(
-    `Summary: ${result.validation?.passed ? "passed" : "failed"}`
+  reporter.complete(
+    execution
   );
 
   return getValidationExitCode(
