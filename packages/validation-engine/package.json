@@ -7,7 +7,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test dist/rules/rules.test.js"
+    "test": "npm run build && node --test dist/rules/rules.test.js dist/security.test.js"
   },
   "dependencies": {
     "@codesentinel/scanner-core": "0.0.1",

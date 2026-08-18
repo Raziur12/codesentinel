@@ -206,6 +206,7 @@ export type FindingCategory =
   | "dependency"
   | "engine"
   | "security"
+  | "secret"
   | "architecture"
   | "technology"
   | "configuration";

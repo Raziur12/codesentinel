@@ -43,6 +43,9 @@ export type ValidationCategory =
   | "lint"
   | "type-check"
   | "dependency"
+  | "engine"
+  | "security"
+  | "secret"
   | "configuration";
 
 export interface CodeSentinelValidationConfig {
@@ -53,6 +56,10 @@ export interface CodeSentinelValidationConfig {
   lint?: boolean;
 
   typeCheck?: boolean;
+
+  security?: boolean;
+
+  secrets?: boolean;
 }
 
 export interface CodeSentinelConfig {
@@ -351,6 +358,46 @@ interface ParsedEngineWarning {
   message: string;
 }
 
+interface ParsedAuditVulnerability {
+  packageName: string;
+
+  severity: FindingSeverity;
+
+  vulnerableRange?: string;
+
+  via: string[];
+
+  fixAvailable: boolean;
+
+  message: string;
+}
+
+interface SecretPattern {
+  code: string;
+
+  title: string;
+
+  severity: FindingSeverity;
+
+  pattern: RegExp;
+}
+
+interface SecretFindingCandidate {
+  file: string;
+
+  line: number;
+
+  column: number;
+
+  code: string;
+
+  title: string;
+
+  severity: FindingSeverity;
+
+  evidence: string;
+}
+
 /**
  * Convert command + arguments into
  * a human-readable command string.
@@ -479,6 +526,14 @@ function normalizeCodeSentinelConfig(
       typeCheck:
         typeof rawValidation.typeCheck === "boolean"
           ? rawValidation.typeCheck
+          : undefined,
+      security:
+        typeof rawValidation.security === "boolean"
+          ? rawValidation.security
+          : undefined,
+      secrets:
+        typeof rawValidation.secrets === "boolean"
+          ? rawValidation.secrets
           : undefined
     };
   }
@@ -866,6 +921,12 @@ function isValidationCategoryEnabled(
 
     case "type-check":
       return validation.typeCheck !== false;
+
+    case "security":
+      return validation.security !== false;
+
+    case "secret":
+      return validation.secrets !== false;
 
     default:
       return true;
@@ -2110,6 +2171,82 @@ function createLintCommand(
   );
 }
 
+function createSecurityAuditCommand(
+  packageManager: string,
+  packageJson: PackageJson | null
+): ValidationCommand {
+  if (
+    !packageJson
+  ) {
+    return createCommand(
+      "Security Audit",
+      "security",
+      60,
+      packageManager,
+      [
+        "audit",
+        "--json"
+      ],
+      false,
+      "No package.json found"
+    );
+  }
+
+  if (
+    packageManager !== "npm"
+  ) {
+    return createCommand(
+      "Security Audit",
+      "security",
+      60,
+      packageManager,
+      [
+        "audit",
+        "--json"
+      ],
+      false,
+      `${packageManager} audit parsing is not supported yet`
+    );
+  }
+
+  return createCommand(
+    "Security Audit",
+    "security",
+    60,
+    "npm",
+    [
+      "audit",
+      "--json"
+    ],
+    true,
+    undefined,
+    {
+      securityType:
+        "dependency-vulnerability"
+    }
+  );
+}
+
+function createSecretScanCommand(): ValidationCommand {
+  return createCommand(
+    "Secret Detection",
+    "secret",
+    70,
+    "codesentinel",
+    [
+      "secrets"
+    ],
+    true,
+    undefined,
+    {
+      internal:
+        true,
+      securityType:
+        "secret"
+    }
+  );
+}
+
 function hasTypeScriptDependency(
   packageJson: PackageJson | null
 ): boolean {
@@ -2384,7 +2521,12 @@ export async function discoverValidationPlan(
           scripts,
           workspaces
         ),
-        typeCheckCommand
+        typeCheckCommand,
+        createSecurityAuditCommand(
+          packageManager,
+          packageJson
+        ),
+        createSecretScanCommand()
       ],
       configuration
     );
@@ -2407,6 +2549,19 @@ function getValidationCategory(
 ): ValidationCategory {
   const name =
     commandName.toLowerCase();
+
+  if (
+    name.includes("secret")
+  ) {
+    return "secret";
+  }
+
+  if (
+    name.includes("audit") ||
+    name.includes("security")
+  ) {
+    return "security";
+  }
 
   if (
     name.includes("install") ||
@@ -2454,6 +2609,12 @@ function getValidationSeverity(
   switch (
     category
   ) {
+    case "security":
+      return "critical";
+
+    case "secret":
+      return "critical";
+
     case "dependency":
       return "high";
 
@@ -2602,6 +2763,491 @@ function parseEngineWarning(
   };
 }
 
+function readRecord(
+  value: unknown
+): Record<string, unknown> | undefined {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function normalizeAuditSeverity(
+  value: unknown
+): FindingSeverity {
+  switch (
+    value
+  ) {
+    case "critical":
+      return "critical";
+
+    case "high":
+      return "high";
+
+    case "moderate":
+    case "medium":
+      return "medium";
+
+    case "low":
+      return "low";
+
+    default:
+      return "info";
+  }
+}
+
+function summarizeAuditVia(
+  value: unknown
+): string[] {
+  if (
+    !Array.isArray(value)
+  ) {
+    return [];
+  }
+
+  return value
+    .map(
+      item => {
+        if (
+          typeof item === "string"
+        ) {
+          return item;
+        }
+
+        const record =
+          readRecord(
+            item
+          );
+
+        const title =
+          record?.title;
+
+        const source =
+          record?.source;
+
+        if (
+          typeof title === "string"
+        ) {
+          return title;
+        }
+
+        if (
+          typeof source === "number" ||
+          typeof source === "string"
+        ) {
+          return String(
+            source
+          );
+        }
+
+        return undefined;
+      }
+    )
+    .filter(
+      (item): item is string =>
+        Boolean(
+          item
+        )
+    );
+}
+
+function isFixAvailable(
+  value: unknown
+): boolean {
+  if (
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  return Boolean(
+    readRecord(
+      value
+    )
+  );
+}
+
+function parseNpmAuditFindings(
+  output: string
+): ParsedAuditVulnerability[] {
+  const trimmedOutput =
+    output.trim();
+
+  if (
+    trimmedOutput.length === 0
+  ) {
+    return [];
+  }
+
+  let parsed:
+    unknown;
+
+  try {
+    parsed =
+      JSON.parse(
+        trimmedOutput
+      );
+  } catch {
+    return [];
+  }
+
+  const root =
+    readRecord(
+      parsed
+    );
+
+  const vulnerabilities =
+    readRecord(
+      root?.vulnerabilities
+    );
+
+  if (
+    !vulnerabilities
+  ) {
+    return [];
+  }
+
+  return Object
+    .entries(
+      vulnerabilities
+    )
+    .map(
+      ([packageName, rawVulnerability]) => {
+        const vulnerability =
+          readRecord(
+            rawVulnerability
+          );
+
+        const severity =
+          normalizeAuditSeverity(
+            vulnerability?.severity
+          );
+
+        const vulnerableRange =
+          typeof vulnerability?.range === "string"
+            ? vulnerability.range
+            : undefined;
+
+        const via =
+          summarizeAuditVia(
+            vulnerability?.via
+          );
+
+        const fixAvailable =
+          isFixAvailable(
+            vulnerability?.fixAvailable
+          );
+
+        const viaText =
+          via.length > 0
+            ? ` via ${via.join(", ")}`
+            : "";
+
+        const rangeText =
+          vulnerableRange
+            ? ` Range: ${vulnerableRange}.`
+            : "";
+
+        return {
+          packageName,
+          severity,
+          vulnerableRange,
+          via,
+          fixAvailable,
+          message:
+            `${packageName} has a ${severity} dependency vulnerability${viaText}.${rangeText}`
+        };
+      }
+    );
+}
+
+const secretPatterns: SecretPattern[] = [
+  {
+    code:
+      "SECRET_AWS_ACCESS_KEY_ID",
+    title:
+      "AWS access key detected",
+    severity:
+      "critical",
+    pattern:
+      /AKIA[0-9A-Z]{16}/g
+  },
+  {
+    code:
+      "SECRET_GITHUB_TOKEN",
+    title:
+      "GitHub token detected",
+    severity:
+      "critical",
+    pattern:
+      /gh[pousr]_[A-Za-z0-9_]{36,255}/g
+  },
+  {
+    code:
+      "SECRET_SLACK_BOT_TOKEN",
+    title:
+      "Slack bot token detected",
+    severity:
+      "critical",
+    pattern:
+      /xoxb-[A-Za-z0-9-]{20,}/g
+  },
+  {
+    code:
+      "SECRET_STRIPE_LIVE_KEY",
+    title:
+      "Stripe live secret key detected",
+    severity:
+      "critical",
+    pattern:
+      /sk_live_[A-Za-z0-9]{16,}/g
+  },
+  {
+    code:
+      "SECRET_PRIVATE_KEY",
+    title:
+      "Private key detected",
+    severity:
+      "critical",
+    pattern:
+      /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/g
+  }
+];
+
+function shouldScanForSecrets(
+  file: string
+): boolean {
+  const normalizedFile =
+    file.toLowerCase();
+
+  if (
+    /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?)$/i.test(
+      normalizedFile
+    )
+  ) {
+    return false;
+  }
+
+  return !/\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|tar|woff2?|ttf|eot|mp4|mov|avi|exe|dll)$/i.test(
+    normalizedFile
+  );
+}
+
+function getLineAndColumn(
+  content: string,
+  index: number
+): {
+  line: number;
+  column: number;
+} {
+  const prefix =
+    content.slice(
+      0,
+      index
+    );
+
+  const lines =
+    prefix.split(/\r?\n/);
+
+  return {
+    line:
+      lines.length,
+    column:
+      lines[lines.length - 1].length + 1
+  };
+}
+
+function redactSecret(
+  value: string
+): string {
+  if (
+    value.length <= 8
+  ) {
+    return "[redacted]";
+  }
+
+  return `${value.slice(0, 4)}...[redacted]...${value.slice(-4)}`;
+}
+
+async function detectSecrets(
+  projectPath: string,
+  files: string[]
+): Promise<SecretFindingCandidate[]> {
+  const findings:
+    SecretFindingCandidate[] = [];
+
+  for (
+    const file
+    of files
+  ) {
+    if (
+      !shouldScanForSecrets(
+        file
+      )
+    ) {
+      continue;
+    }
+
+    const fullPath =
+      path.join(
+        projectPath,
+        file
+      );
+
+    let content:
+      string;
+
+    try {
+      content =
+        await fs.readFile(
+          fullPath,
+          "utf8"
+        );
+    } catch {
+      continue;
+    }
+
+    for (
+      const secretPattern
+      of secretPatterns
+    ) {
+      for (
+        const match
+        of content.matchAll(
+          secretPattern.pattern
+        )
+      ) {
+        if (
+          match.index === undefined
+        ) {
+          continue;
+        }
+
+        const location =
+          getLineAndColumn(
+            content,
+            match.index
+          );
+
+        findings.push({
+          file,
+          line:
+            location.line,
+          column:
+            location.column,
+          code:
+            secretPattern.code,
+          title:
+            secretPattern.title,
+          severity:
+            secretPattern.severity,
+          evidence:
+            redactSecret(
+              match[0]
+            )
+        });
+      }
+    }
+  }
+
+  return findings;
+}
+
+async function runSecretScan(
+  projectPath: string,
+  validationCommand: ValidationCommand
+): Promise<ValidationResult> {
+  const started =
+    Date.now();
+
+  const files =
+    await getProjectFiles(
+      projectPath
+    );
+
+  const secretFindings =
+    await detectSecrets(
+      projectPath,
+      files
+    );
+
+  const command =
+    getCommandText(
+      validationCommand
+    );
+
+  const findings =
+    secretFindings.map(
+      finding =>
+        createValidationFinding({
+          severity:
+            finding.severity,
+          category:
+            "secret",
+          title:
+            finding.title,
+          message:
+            `${finding.title} in ${finding.file}. Rotate the secret and remove it from source control.`,
+          command,
+          exitCode:
+            secretFindings.length > 0
+              ? 1
+              : 0,
+          evidence:
+            finding.evidence,
+          file:
+            finding.file,
+          line:
+            finding.line,
+          column:
+            finding.column,
+          code:
+            finding.code,
+          suggestion:
+            "Move the credential to a secret manager or environment variable, then rotate the exposed value.",
+          metadata:
+            {
+              validationCommand:
+                validationCommand.name,
+              securityType:
+                "secret"
+            }
+        })
+    );
+
+  return {
+    name:
+      validationCommand.name,
+    command,
+    status:
+      findings.length > 0
+        ? "failed"
+        : "passed",
+    category:
+      validationCommand.category,
+    exitCode:
+      findings.length > 0
+        ? 1
+        : 0,
+    stdout:
+      findings.length > 0
+        ? `${findings.length} potential secret(s) detected.`
+        : "No high-confidence secrets detected.",
+    stderr:
+      "",
+    durationMs:
+      Date.now() - started,
+    findings,
+    warnings:
+      []
+  };
+}
+
 /**
  * Create structured findings
  * whenever a validation command fails.
@@ -2638,6 +3284,94 @@ function createFailureFindings(
     stderr.trim() ||
     stdout.trim() ||
     "Command failed without output.";
+
+  if (
+    category === "security" &&
+    validationCommand.name === "Security Audit"
+  ) {
+    const parsedAuditFindings =
+      parseNpmAuditFindings(
+        stdout.trim() ||
+        stderr.trim()
+      );
+
+    if (
+      parsedAuditFindings.length > 0
+    ) {
+      return parsedAuditFindings.map(
+        auditFinding => {
+          const ruleResult =
+            evaluateValidationRules({
+              category:
+                "security",
+              code:
+                "NPM_AUDIT_VULNERABILITY",
+              message:
+                auditFinding.message,
+              metadata:
+                {
+                  packageName:
+                    auditFinding.packageName,
+                  vulnerableRange:
+                    auditFinding.vulnerableRange,
+                  via:
+                    auditFinding.via,
+                  fixAvailable:
+                    auditFinding.fixAvailable,
+                  exitCode,
+                  validationCommand:
+                    validationCommand.name
+                }
+            });
+
+          return createValidationFinding({
+            severity:
+              auditFinding.severity,
+            category:
+              "security",
+            title:
+              "Dependency vulnerability",
+            message:
+              auditFinding.message,
+            command,
+            exitCode,
+            evidence:
+              auditFinding.via.join(", "),
+            code:
+              "NPM_AUDIT_VULNERABILITY",
+            suggestion:
+              ruleResult?.suggestion ??
+              (
+                auditFinding.fixAvailable
+                  ? "Run npm audit fix and review the dependency changes."
+                  : "Upgrade or replace the vulnerable dependency."
+              ),
+            documentation:
+              ruleResult?.documentation,
+            confidence:
+              ruleResult?.confidence,
+            metadata:
+              {
+                packageName:
+                  auditFinding.packageName,
+                vulnerableRange:
+                  auditFinding.vulnerableRange,
+                via:
+                  auditFinding.via,
+                fixAvailable:
+                  auditFinding.fixAvailable,
+                securityType:
+                  "dependency-vulnerability",
+                ruleId:
+                  ruleResult?.ruleId,
+                ruleMetadata:
+                  ruleResult?.metadata
+              }
+          });
+        }
+      );
+    }
+  }
 
   /**
    * Parse ALL TypeScript errors.
@@ -3007,6 +3741,16 @@ function runCommand(
   projectPath: string,
   validationCommand: ValidationCommand
 ): Promise<ValidationResult> {
+  if (
+    validationCommand.metadata?.internal === true &&
+    validationCommand.name === "Secret Detection"
+  ) {
+    return runSecretScan(
+      projectPath,
+      validationCommand
+    );
+  }
+
   return new Promise(
     (resolve) => {
       const started =
@@ -3016,12 +3760,19 @@ function runCommand(
         process.platform ===
         "win32";
 
-      /**
-       * On Windows npm is executed
-       * through npm.cmd.
-       */
+      const windowsCmdExecutables =
+        new Set([
+          "npm",
+          "npx",
+          "yarn",
+          "pnpm"
+        ]);
+
       const executable =
-        isWindows
+        isWindows &&
+        windowsCmdExecutables.has(
+          validationCommand.command
+        )
           ? `${validationCommand.command}.cmd`
           : validationCommand.command;
 

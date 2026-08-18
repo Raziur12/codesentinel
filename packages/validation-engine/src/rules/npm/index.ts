@@ -29,5 +29,35 @@ export const npmRules: ValidationRule[] = [
             0.95
         };
       }
+  },
+  {
+    id:
+      "npm/audit-vulnerability",
+
+    appliesTo:
+      context =>
+        context.code === "NPM_AUDIT_VULNERABILITY",
+
+    evaluate:
+      context => {
+        const packageName =
+          typeof context.metadata?.packageName === "string"
+            ? context.metadata.packageName
+            : "the vulnerable package";
+
+        const fixAvailable =
+          context.metadata?.fixAvailable === true;
+
+        return {
+          suggestion:
+            fixAvailable
+              ? `Run npm audit fix, then review and test the ${packageName} dependency update.`
+              : `Upgrade, patch, or replace ${packageName}; npm audit did not report an automatic safe fix.`,
+          documentation:
+            "https://docs.npmjs.com/cli/commands/npm-audit",
+          confidence:
+            0.95
+        };
+      }
   }
 ];
