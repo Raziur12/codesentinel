@@ -76,6 +76,28 @@ interface JsonScanOutput {
   };
 }
 
+const EXIT_VALIDATION_PASSED =
+  0;
+
+const EXIT_VALIDATION_FAILED =
+  1;
+
+const EXIT_SCANNER_ERROR =
+  2;
+
+const EXIT_INVALID_INPUT =
+  3;
+
+class InvalidInputError extends Error {
+  constructor(
+    message: string
+  ) {
+    super(message);
+    this.name =
+      "InvalidInputError";
+  }
+}
+
 function parseCliOptions(
   args: string[]
 ): CliOptions {
@@ -110,7 +132,7 @@ function parseCliOptions(
       if (
         !workspacePath
       ) {
-        throw new Error(
+        throw new InvalidInputError(
           `${arg} requires a workspace path`
         );
       }
@@ -129,7 +151,7 @@ function parseCliOptions(
         requestedFormat !== "json" &&
         requestedFormat !== "text"
       ) {
-        throw new Error(
+        throw new InvalidInputError(
           "--format requires json or text"
         );
       }
@@ -153,7 +175,7 @@ function parseCliOptions(
         requestedFormat !== "json" &&
         requestedFormat !== "text"
       ) {
-        throw new Error(
+        throw new InvalidInputError(
           "--format requires json or text"
         );
       }
@@ -506,7 +528,39 @@ async function withConsoleSilenced<T>(
 }
 
 
-async function main(): Promise<void> {
+function getValidationExitCode(
+  execution: ScanExecution
+): number {
+  return execution.validationReport.passed
+    ? EXIT_VALIDATION_PASSED
+    : EXIT_VALIDATION_FAILED;
+}
+
+function getErrorExitCode(
+  error: unknown
+): number {
+  if (
+    error instanceof InvalidInputError
+  ) {
+    return EXIT_INVALID_INPUT;
+  }
+
+  if (
+    error instanceof Error &&
+    (
+      error.message.includes("Project directory does not exist") ||
+      error.message.includes("Project path is not a directory") ||
+      error.message.includes("Workspace path must be inside project root") ||
+      error.message.includes("requires a workspace path")
+    )
+  ) {
+    return EXIT_INVALID_INPUT;
+  }
+
+  return EXIT_SCANNER_ERROR;
+}
+
+async function main(): Promise<number> {
   const cliOptions =
     parseCliOptions(
       process.argv.slice(2)
@@ -568,7 +622,9 @@ async function main(): Promise<void> {
       )
     );
 
-    return;
+    return getValidationExitCode(
+      execution
+    );
   }
 
 
@@ -613,17 +669,34 @@ async function main(): Promise<void> {
   console.log(
     `Summary: ${result.validation?.passed ? "passed" : "failed"}`
   );
+
+  return getValidationExitCode(
+    execution
+  );
 }
 
 
-main().catch(
-  (error) => {
+main()
+  .then(
+    exitCode => {
+      process.exitCode =
+        exitCode;
+    }
+  )
+  .catch(
+    (error) => {
+      const exitCode =
+        getErrorExitCode(
+          error
+        );
+
     console.error(
       "Scanner failed:"
     );
 
     console.error(error);
 
-    process.exit(1);
-  }
-);
+      process.exitCode =
+        exitCode;
+    }
+  );
