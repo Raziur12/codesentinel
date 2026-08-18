@@ -15,6 +15,10 @@ import type {
   PackageManagerName
 } from "@codesentinel/scanner-core";
 
+import {
+  evaluateValidationRules
+} from "./rules/index.js";
+
 /**
  * Validation status.
  */
@@ -297,26 +301,6 @@ interface ParsedEngineWarning {
   currentNpm?: string;
 
   message: string;
-}
-
-/**
- * Create an actionable suggestion
- * for a parsed engine warning.
- */
-function createEngineWarningSuggestion(
-  warning: ParsedEngineWarning
-): string {
-  if (
-    warning.requiredNode
-  ) {
-    return (
-      `Upgrade Node.js to a supported version: ${warning.requiredNode}.`
-    );
-  }
-
-  return (
-    "Check the package engine requirements and use a compatible Node.js version."
-  );
 }
 
 /**
@@ -1993,40 +1977,6 @@ function parseTypeScriptErrors(
 
 
 
-function createTypeScriptSuggestion(
-  error: ParsedTypeScriptError
-): string {
-  if (
-    error.code === "TS2322"
-  ) {
-    return (
-      "Check the value type and variable type. " +
-      "Make sure the assigned value matches the expected TypeScript type."
-    );
-  }
-
-  if (
-    error.code === "TS2339"
-  ) {
-    return (
-      "Check whether the property or method exists on the current type. " +
-      "Verify the object type and property name."
-    );
-  }
-
-  if (
-    error.code === "TS2304"
-  ) {
-    return (
-      "Check whether the referenced name is declared, imported, or spelled correctly."
-    );
-  }
-
-  return (
-    "Review the TypeScript error and update the code so the types and declarations match."
-  );
-}
-
 /**
  * Parse Node/npm engine warnings.
  *
@@ -2176,52 +2126,80 @@ function createFailureFindings(
     return parsedTypeScriptErrors.map(
       (
         error
-      ): ValidationFinding => createValidationFinding({
-        severity:
-          severity,
+      ): ValidationFinding => {
+        const ruleResult =
+          evaluateValidationRules({
+            category,
+            code:
+              error.code,
+            message:
+              error.message,
+            metadata:
+              {
+                file:
+                  error.file,
+                line:
+                  error.line,
+                column:
+                  error.column,
+                exitCode,
+                validationCommand:
+                  validationCommand.name
+              }
+          });
 
-        category,
+        return createValidationFinding({
+          severity:
+            severity,
 
-        title:
-          "TypeScript error",
+          category,
 
-        message:
-          error.message,
+          title:
+            "TypeScript error",
 
-        command,
+          message:
+            error.message,
 
-        exitCode,
+          command,
 
-        evidence:
-          `${error.file}(${error.line},${error.column}) [${error.code}]`,
+          exitCode,
 
-        file:
-          error.file,
+          evidence:
+            `${error.file}(${error.line},${error.column}) [${error.code}]`,
 
-        line:
-          error.line,
+          file:
+            error.file,
 
-        column:
-          error.column,
+          line:
+            error.line,
 
-        code:
-          error.code,
+          column:
+            error.column,
 
-        suggestion:
-          createTypeScriptSuggestion(
-            error
-          ),
+          code:
+            error.code,
 
-        documentation:
-          `https://www.typescriptlang.org/tsconfig#${error.code}`,
+          suggestion:
+            ruleResult?.suggestion,
 
-        metadata:
-          {
-            exitCode,
-            validationCommand:
-              validationCommand.name
-          }
-      })
+          documentation:
+            ruleResult?.documentation,
+
+          confidence:
+            ruleResult?.confidence,
+
+          metadata:
+            {
+              exitCode,
+              validationCommand:
+                validationCommand.name,
+              ruleId:
+                ruleResult?.ruleId,
+              ruleMetadata:
+                ruleResult?.metadata
+            }
+        });
+      }
     );
   }
 
@@ -2268,6 +2246,32 @@ function createFailureFindings(
         ` Current Node.js version is ${parsedEngineWarning.currentNode}.`;
     }
 
+    const engineRuleMetadata =
+      {
+        packageName:
+          parsedEngineWarning.packageName,
+        packageVersion:
+          parsedEngineWarning.packageVersion,
+        requiredNode:
+          parsedEngineWarning.requiredNode,
+        currentNode:
+          parsedEngineWarning.currentNode,
+        currentNpm:
+          parsedEngineWarning.currentNpm
+      };
+
+    const ruleResult =
+      evaluateValidationRules({
+        category:
+          "engine",
+        code:
+          "EBADENGINE",
+        message:
+          engineMessage,
+        metadata:
+          engineRuleMetadata
+      });
+
     return [
       createValidationFinding({
         severity:
@@ -2293,23 +2297,21 @@ function createFailureFindings(
           "EBADENGINE",
 
         suggestion:
-          createEngineWarningSuggestion(
-            parsedEngineWarning
-          ),
+          ruleResult?.suggestion,
 
         documentation:
-          "https://docs.npmjs.com/cli/using-npm/config#engine-strict",
+          ruleResult?.documentation,
+
+        confidence:
+          ruleResult?.confidence,
 
         metadata:
           {
-            packageName:
-              parsedEngineWarning.packageName,
-            packageVersion:
-              parsedEngineWarning.packageVersion,
-            requiredNode:
-              parsedEngineWarning.requiredNode,
-            currentNode:
-              parsedEngineWarning.currentNode
+            ...engineRuleMetadata,
+            ruleId:
+              ruleResult?.ruleId,
+            ruleMetadata:
+              ruleResult?.metadata
           }
       })
     ];
@@ -2643,6 +2645,32 @@ function runCommand(
                 ` Current Node.js: ${parsedEngineWarning.currentNode}.`;
             }
 
+            const engineRuleMetadata =
+              {
+                packageName:
+                  parsedEngineWarning.packageName,
+                packageVersion:
+                  parsedEngineWarning.packageVersion,
+                requiredNode:
+                  parsedEngineWarning.requiredNode,
+                currentNode:
+                  parsedEngineWarning.currentNode,
+                currentNpm:
+                  parsedEngineWarning.currentNpm
+              };
+
+            const ruleResult =
+              evaluateValidationRules({
+                category:
+                  "engine",
+                code:
+                  "EBADENGINE",
+                message:
+                  engineMessage,
+                metadata:
+                  engineRuleMetadata
+              });
+
             const warningFinding:
               ValidationFinding = createValidationFinding({
               severity:
@@ -2671,23 +2699,21 @@ function runCommand(
                 "EBADENGINE",
 
               suggestion:
-                createEngineWarningSuggestion(
-                  parsedEngineWarning
-                ),
+                ruleResult?.suggestion,
 
               documentation:
-                "https://docs.npmjs.com/cli/using-npm/config#engine-strict",
+                ruleResult?.documentation,
+
+              confidence:
+                ruleResult?.confidence,
 
               metadata:
                 {
-                  packageName:
-                    parsedEngineWarning.packageName,
-                  packageVersion:
-                    parsedEngineWarning.packageVersion,
-                  requiredNode:
-                    parsedEngineWarning.requiredNode,
-                  currentNode:
-                    parsedEngineWarning.currentNode
+                  ...engineRuleMetadata,
+                  ruleId:
+                    ruleResult?.ruleId,
+                  ruleMetadata:
+                    ruleResult?.metadata
                 }
             });
 
