@@ -6,6 +6,10 @@ import {
   validateProject
 } from "@codesentinel/validation-engine";
 
+import type {
+  ValidationReport
+} from "@codesentinel/validation-engine";
+
 import {
   analyzeProject
 } from "@codesentinel/project-analyzer";
@@ -34,6 +38,42 @@ interface CliOptions {
   inputPath: string;
 
   workspacePath?: string;
+
+  format: "text" | "json";
+}
+
+interface ScanExecution {
+  result: ScanResult;
+
+  validationReport: ValidationReport;
+}
+
+interface JsonScanOutput {
+  scan: {
+    metadata: {
+      schemaVersion: string;
+
+      generatedAt: string;
+
+      format: "json";
+    };
+
+    project: {
+      path: string;
+
+      filesScanned: number;
+
+      structure: ScanResult["projectStructure"];
+    };
+
+    technologyProfile: ScanResult["technologyProfile"];
+
+    validation: ValidationReport;
+
+    findings: ValidationReport["findings"];
+
+    summary: NonNullable<ScanResult["validation"]>;
+  };
 }
 
 function parseCliOptions(
@@ -46,6 +86,10 @@ function parseCliOptions(
   let workspacePath:
     | string
     | undefined;
+
+  let format:
+    CliOptions["format"] =
+      "text";
 
   for (
     let index = 0;
@@ -72,6 +116,51 @@ function parseCliOptions(
       }
 
       index += 1;
+      continue;
+    }
+
+    if (
+      arg === "--format"
+    ) {
+      const requestedFormat =
+        args[index + 1];
+
+      if (
+        requestedFormat !== "json" &&
+        requestedFormat !== "text"
+      ) {
+        throw new Error(
+          "--format requires json or text"
+        );
+      }
+
+      format =
+        requestedFormat;
+
+      index += 1;
+      continue;
+    }
+
+    if (
+      arg.startsWith("--format=")
+    ) {
+      const requestedFormat =
+        arg.slice(
+          "--format=".length
+        );
+
+      if (
+        requestedFormat !== "json" &&
+        requestedFormat !== "text"
+      ) {
+        throw new Error(
+          "--format requires json or text"
+        );
+      }
+
+      format =
+        requestedFormat;
+
       continue;
     }
 
@@ -107,7 +196,9 @@ function parseCliOptions(
     inputPath:
       inputPath ?? ".",
 
-    workspacePath
+    workspacePath,
+
+    format
   };
 }
 
@@ -168,7 +259,7 @@ async function getFiles(
 async function scanProject(
   projectPath: string,
   plugins: ScannerPlugin[]
-): Promise<ScanResult> {
+): Promise<ScanExecution> {
   const startedAt =
     new Date().toISOString();
 
@@ -302,7 +393,7 @@ async function scanProject(
     new Date().toISOString();
 
 
-  return {
+  const result: ScanResult = {
     projectPath,
     filesScanned: files.length,
     projectStructure,
@@ -344,6 +435,74 @@ async function scanProject(
     startedAt,
     completedAt
   };
+
+  return {
+    result,
+    validationReport
+  };
+}
+
+function createJsonOutput(
+  execution: ScanExecution
+): JsonScanOutput {
+  return {
+    scan: {
+      metadata: {
+        schemaVersion:
+          "1.0.0",
+        generatedAt:
+          execution.result.completedAt,
+        format:
+          "json"
+      },
+      project: {
+        path:
+          execution.result.projectPath,
+        filesScanned:
+          execution.result.filesScanned,
+        structure:
+          execution.result.projectStructure
+      },
+      technologyProfile:
+        execution.result.technologyProfile,
+      validation:
+        execution.validationReport,
+      findings:
+        execution.validationReport.findings,
+      summary:
+        execution.result.validation ?? {
+          passed:
+            false,
+          total:
+            0,
+          passedCount:
+            0,
+          failedCount:
+            0,
+          warningCount:
+            0,
+          skippedCount:
+            0
+        }
+    }
+  };
+}
+
+async function withConsoleSilenced<T>(
+  callback: () => Promise<T>
+): Promise<T> {
+  const originalLog =
+    console.log;
+
+  console.log =
+    () => undefined;
+
+  try {
+    return await callback();
+  } finally {
+    console.log =
+      originalLog;
+  }
 }
 
 
@@ -385,6 +544,33 @@ async function main(): Promise<void> {
         )
       : undefined;
 
+  if (
+    cliOptions.format === "json"
+  ) {
+    const execution =
+      await withConsoleSilenced(
+        () =>
+          scanProject(
+            projectPath,
+            [
+              universalTechnologyPlugin
+            ]
+          )
+      );
+
+    console.log(
+      JSON.stringify(
+        createJsonOutput(
+          execution
+        ),
+        null,
+        2
+      )
+    );
+
+    return;
+  }
+
 
   console.log(
     "🔎 CodeSentinel Scanner"
@@ -413,7 +599,7 @@ async function main(): Promise<void> {
   console.log("");
 
 
-  const result =
+  const execution =
     await scanProject(
       projectPath,
       [
@@ -421,13 +607,11 @@ async function main(): Promise<void> {
       ]
     );
 
+  const result =
+    execution.result;
 
   console.log(
-    JSON.stringify(
-      result,
-      null,
-      2
-    )
+    `Summary: ${result.validation?.passed ? "passed" : "failed"}`
   );
 }
 
