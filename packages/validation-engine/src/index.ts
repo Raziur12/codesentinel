@@ -4,10 +4,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import {
+  createFindingId,
+  createFindingKey,
   detectPackageManager
 } from "@codesentinel/scanner-core";
 
 import type {
+  CommonFinding,
+  FindingSeverity,
   PackageManagerName
 } from "@codesentinel/scanner-core";
 
@@ -24,11 +28,7 @@ export type ValidationStatus =
  * Validation severity.
  */
 export type ValidationSeverity =
-  | "info"
-  | "low"
-  | "medium"
-  | "high"
-  | "critical";
+  FindingSeverity;
 
 /**
  * Validation category.
@@ -67,32 +67,14 @@ export interface ValidationCommand {
 /**
  * Structured validation finding.
  */
-export interface ValidationFinding {
+export interface ValidationFinding extends CommonFinding {
   type: "validation";
-
-  severity: ValidationSeverity;
-
-  category: ValidationCategory;
-
-  title: string;
-
-  message: string;
 
   command: string;
 
   exitCode: number | null;
 
   evidence?: string;
-
-  file?: string;
-
-  line?: number;
-
-  column?: number;
-
-  code?: string;
-
-  suggestion?: string;
 }
 
 /**
@@ -623,6 +605,58 @@ function createCommand(
     priority,
     skipReason,
     metadata
+  };
+}
+
+type ValidationFindingInput =
+  Omit<
+    ValidationFinding,
+    "type" | "id" | "key" | "source" | "confidence"
+  > &
+    Partial<
+      Pick<
+        ValidationFinding,
+        "source" | "confidence"
+      >
+    >;
+
+function createValidationFinding(
+  input: ValidationFindingInput
+): ValidationFinding {
+  const source =
+    input.source ?? "validation-engine";
+
+  const confidence =
+    input.confidence ?? 0.95;
+
+  const key =
+    createFindingKey({
+      source,
+      category:
+        input.category,
+      code:
+        input.code,
+      file:
+        input.file,
+      line:
+        input.line,
+      column:
+        input.column,
+      message:
+        input.message
+    });
+
+  return {
+    ...input,
+    type:
+      "validation",
+    id:
+      createFindingId(
+        key
+      ),
+    key,
+    source,
+    confidence
   };
 }
 
@@ -2142,11 +2176,9 @@ function createFailureFindings(
     return parsedTypeScriptErrors.map(
       (
         error
-      ): ValidationFinding => ({
-        type:
-          "validation",
-
-        severity,
+      ): ValidationFinding => createValidationFinding({
+        severity:
+          severity,
 
         category,
 
@@ -2178,7 +2210,17 @@ function createFailureFindings(
         suggestion:
           createTypeScriptSuggestion(
             error
-          )
+          ),
+
+        documentation:
+          `https://www.typescriptlang.org/tsconfig#${error.code}`,
+
+        metadata:
+          {
+            exitCode,
+            validationCommand:
+              validationCommand.name
+          }
       })
     );
   }
@@ -2227,14 +2269,12 @@ function createFailureFindings(
     }
 
     return [
-      {
-        type:
-          "validation",
-
+      createValidationFinding({
         severity:
           "medium",
 
-        category,
+        category:
+          "engine",
 
         title:
           "Node.js engine warning",
@@ -2255,8 +2295,23 @@ function createFailureFindings(
         suggestion:
           createEngineWarningSuggestion(
             parsedEngineWarning
-          )
-      }
+          ),
+
+        documentation:
+          "https://docs.npmjs.com/cli/using-npm/config#engine-strict",
+
+        metadata:
+          {
+            packageName:
+              parsedEngineWarning.packageName,
+            packageVersion:
+              parsedEngineWarning.packageVersion,
+            requiredNode:
+              parsedEngineWarning.requiredNode,
+            currentNode:
+              parsedEngineWarning.currentNode
+          }
+      })
     ];
   }
 
@@ -2264,10 +2319,7 @@ function createFailureFindings(
    * Generic validation failure.
    */
   return [
-    {
-      type:
-        "validation",
-
+    createValidationFinding({
       severity,
 
       category,
@@ -2283,8 +2335,14 @@ function createFailureFindings(
       exitCode,
 
       evidence:
-        output
-    }
+        output,
+
+      metadata:
+        {
+          validationCommand:
+            validationCommand.name
+        }
+    })
   ];
 }
 
@@ -2306,13 +2364,7 @@ function createFailureFindings(
 function getFindingKey(
   finding: ValidationFinding
 ): string {
-  return [
-    finding.code ?? "",
-    finding.file ?? "",
-    finding.line ?? "",
-    finding.column ?? "",
-    finding.message.trim()
-  ].join("|");
+  return finding.key;
 }
 
 /**
@@ -2592,15 +2644,12 @@ function runCommand(
             }
 
             const warningFinding:
-              ValidationFinding = {
-              type:
-                "validation",
-
+              ValidationFinding = createValidationFinding({
               severity:
                 "medium",
 
               category:
-                validationCommand.category,
+                "engine",
 
               title:
                 "Node.js engine warning",
@@ -2624,8 +2673,23 @@ function runCommand(
               suggestion:
                 createEngineWarningSuggestion(
                   parsedEngineWarning
-                )
-            };
+                ),
+
+              documentation:
+                "https://docs.npmjs.com/cli/using-npm/config#engine-strict",
+
+              metadata:
+                {
+                  packageName:
+                    parsedEngineWarning.packageName,
+                  packageVersion:
+                    parsedEngineWarning.packageVersion,
+                  requiredNode:
+                    parsedEngineWarning.requiredNode,
+                  currentNode:
+                    parsedEngineWarning.currentNode
+                }
+            });
 
             result.warnings?.push(
               warningFinding

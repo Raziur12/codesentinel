@@ -192,8 +192,10 @@ export interface ValidationSummary {
 }
 
 export type FindingSeverity =
-  | "error"
-  | "warning"
+  | "critical"
+  | "high"
+  | "medium"
+  | "low"
   | "info";
 
 export type FindingCategory =
@@ -202,17 +204,98 @@ export type FindingCategory =
   | "lint"
   | "type-check"
   | "dependency"
-  | "configuration"
+  | "engine"
+  | "security"
+  | "architecture"
   | "technology"
-  | "security";
+  | "configuration";
 
-export interface ScannerFinding {
+export interface CommonFinding {
+  id: string;
+
+  key: string;
+
   severity: FindingSeverity;
+
   category: FindingCategory;
+
+  code?: string;
+
   title: string;
+
   message: string;
+
+  file?: string;
+
+  line?: number;
+
+  column?: number;
+
+  source: string;
+
   command?: string;
+
+  suggestion?: string;
+
+  documentation?: string;
+
+  confidence: number;
+
+  metadata?: Record<string, unknown>;
+}
+
+export interface ScannerFinding extends CommonFinding {
   evidence?: string;
+}
+
+function hashFindingKey(
+  key: string
+): string {
+  let hash =
+    5381;
+
+  for (
+    let index = 0;
+    index < key.length;
+    index += 1
+  ) {
+    hash =
+      (hash * 33) ^
+      key.charCodeAt(index);
+  }
+
+  return (
+    hash >>> 0
+  ).toString(36);
+}
+
+export function createFindingKey(
+  finding: Pick<
+    CommonFinding,
+    "category" | "message" | "source"
+  > &
+    Partial<
+      Pick<
+        CommonFinding,
+        "code" | "file" | "line" | "column"
+      >
+    >
+): string {
+  return [
+    finding.source,
+    finding.category,
+    finding.code ?? "",
+    finding.file ?? "",
+    finding.line ?? "",
+    finding.column ?? "",
+    finding.message.trim()
+  ].join("|");
+}
+
+export function createFindingId(
+  key: string
+): string {
+  return `cs_${hashFindingKey(key)}`;
 }
 
 export interface ScanResult {
