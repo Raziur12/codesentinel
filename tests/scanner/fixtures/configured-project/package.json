@@ -1,0 +1,12 @@
+{
+  "name": "configured-project",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "exit 1",
+    "test": "echo \"Tests passed\"",
+    "lint": "exit 1"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}

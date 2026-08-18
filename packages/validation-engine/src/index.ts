@@ -45,6 +45,34 @@ export type ValidationCategory =
   | "dependency"
   | "configuration";
 
+export interface CodeSentinelValidationConfig {
+  build?: boolean;
+
+  test?: boolean;
+
+  lint?: boolean;
+
+  typeCheck?: boolean;
+}
+
+export interface CodeSentinelConfig {
+  validation?: CodeSentinelValidationConfig;
+
+  severity?: Record<string, string>;
+
+  ignore?: string[];
+
+  include?: string[];
+
+  exclude?: string[];
+}
+
+export interface LoadedCodeSentinelConfig {
+  path?: string;
+
+  config: CodeSentinelConfig;
+}
+
 /**
  * Validation command definition.
  */
@@ -231,6 +259,8 @@ export interface ValidationPlan {
 
   commands: ValidationCommand[];
 
+  configuration?: LoadedCodeSentinelConfig;
+
   workspacePatterns: string[];
 
   workspaces: ValidationWorkspace[];
@@ -243,6 +273,8 @@ export interface ValidationReport {
   projectPath: string;
 
   packageManager: string;
+
+  configuration?: LoadedCodeSentinelConfig;
 
   results: ValidationResult[];
 
@@ -365,6 +397,155 @@ async function readPackageJson(
   } catch {
     return null;
   }
+}
+
+function normalizeStringArray(
+  value: unknown
+): string[] | undefined {
+  if (
+    !Array.isArray(value)
+  ) {
+    return undefined;
+  }
+
+  return value.filter(
+    (item): item is string =>
+      typeof item === "string"
+  );
+}
+
+function normalizeCodeSentinelConfig(
+  value: unknown
+): CodeSentinelConfig {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return {};
+  }
+
+  const rawConfig =
+    value as Record<string, unknown>;
+
+  const rawValidation =
+    rawConfig.validation &&
+    typeof rawConfig.validation === "object" &&
+    !Array.isArray(rawConfig.validation)
+      ? rawConfig.validation as Record<string, unknown>
+      : undefined;
+
+  const rawSeverity =
+    rawConfig.severity &&
+    typeof rawConfig.severity === "object" &&
+    !Array.isArray(rawConfig.severity)
+      ? rawConfig.severity as Record<string, unknown>
+      : undefined;
+
+  const config: CodeSentinelConfig = {};
+
+  if (
+    rawValidation
+  ) {
+    config.validation = {
+      build:
+        typeof rawValidation.build === "boolean"
+          ? rawValidation.build
+          : undefined,
+      test:
+        typeof rawValidation.test === "boolean"
+          ? rawValidation.test
+          : undefined,
+      lint:
+        typeof rawValidation.lint === "boolean"
+          ? rawValidation.lint
+          : undefined,
+      typeCheck:
+        typeof rawValidation.typeCheck === "boolean"
+          ? rawValidation.typeCheck
+          : undefined
+    };
+  }
+
+  if (
+    rawSeverity
+  ) {
+    config.severity =
+      Object.fromEntries(
+        Object.entries(rawSeverity).filter(
+          (
+            entry
+          ): entry is [string, string] =>
+            typeof entry[1] === "string"
+        )
+      );
+  }
+
+  config.ignore =
+    normalizeStringArray(
+      rawConfig.ignore
+    );
+
+  config.include =
+    normalizeStringArray(
+      rawConfig.include
+    );
+
+  config.exclude =
+    normalizeStringArray(
+      rawConfig.exclude
+    );
+
+  return config;
+}
+
+async function readCodeSentinelConfig(
+  projectPath: string
+): Promise<LoadedCodeSentinelConfig | undefined> {
+  const candidates = [
+    ".codesentinel.json",
+    path.join(
+      ".codesentinel",
+      "config.json"
+    )
+  ];
+
+  for (
+    const relativePath
+    of candidates
+  ) {
+    const configPath =
+      path.join(
+        projectPath,
+        relativePath
+      );
+
+    if (
+      !(await fileExists(configPath))
+    ) {
+      continue;
+    }
+
+    const content =
+      await fs.readFile(
+        configPath,
+        "utf8"
+      );
+
+    return {
+      path:
+        relativePath.replace(
+          /\\/g,
+          "/"
+        ),
+      config:
+        normalizeCodeSentinelConfig(
+          JSON.parse(content)
+        )
+    };
+  }
+
+  return undefined;
 }
 
 function getWorkspacePatterns(
@@ -590,6 +771,71 @@ function createCommand(
     skipReason,
     metadata
   };
+}
+
+function isValidationCategoryEnabled(
+  category: ValidationCategory,
+  config: CodeSentinelConfig
+): boolean {
+  const validation =
+    config.validation;
+
+  if (
+    !validation
+  ) {
+    return true;
+  }
+
+  switch (
+    category
+  ) {
+    case "build":
+      return validation.build !== false;
+
+    case "test":
+      return validation.test !== false;
+
+    case "lint":
+      return validation.lint !== false;
+
+    case "type-check":
+      return validation.typeCheck !== false;
+
+    default:
+      return true;
+  }
+}
+
+function applyValidationConfig(
+  commands: ValidationCommand[],
+  configuration: LoadedCodeSentinelConfig | undefined
+): ValidationCommand[] {
+  if (
+    !configuration
+  ) {
+    return commands;
+  }
+
+  return commands.map(
+    command => {
+      if (
+        isValidationCategoryEnabled(
+          command.category,
+          configuration.config
+        )
+      ) {
+        return command;
+      }
+
+      return {
+        ...command,
+        available:
+          false,
+        skipReason:
+          `Disabled by CodeSentinel configuration (${configuration.path ?? "inline config"})`
+      };
+    }
+  );
 }
 
 type ValidationFindingInput =
@@ -1718,6 +1964,11 @@ function detectTypeScriptProject(
 export async function discoverValidationPlan(
   projectPath: string
 ): Promise<ValidationPlan> {
+  const configuration =
+    await readCodeSentinelConfig(
+      projectPath
+    );
+
   const packageJson =
     await readPackageJson(
       projectPath
@@ -1835,31 +2086,38 @@ export async function discoverValidationPlan(
             "TypeScript type check is not applicable"
         );
 
+  const commands =
+    applyValidationConfig(
+      [
+        installCommand,
+        createBuildCommand(
+          packageManager,
+          packageManagerCommands,
+          buildSystem
+        ),
+        createTestCommand(
+          packageManager,
+          packageManagerCommands,
+          testFramework
+        ),
+        createLintCommand(
+          packageManager,
+          packageManagerCommands,
+          lintDetection,
+          scripts,
+          workspaces
+        ),
+        typeCheckCommand
+      ],
+      configuration
+    );
+
   return {
     packageManager,
+    configuration,
     workspacePatterns,
     workspaces,
-    commands: [
-      installCommand,
-      createBuildCommand(
-        packageManager,
-        packageManagerCommands,
-        buildSystem
-      ),
-      createTestCommand(
-        packageManager,
-        packageManagerCommands,
-        testFramework
-      ),
-      createLintCommand(
-        packageManager,
-        packageManagerCommands,
-        lintDetection,
-        scripts,
-        workspaces
-      ),
-      typeCheckCommand
-    ]
+    commands
   };
 }
 
@@ -2823,7 +3081,8 @@ function runCommand(
 export async function validateProject(
   projectPath: string,
   commands: ValidationCommand[],
-  packageManager = "npm"
+  packageManager = "npm",
+  configuration?: LoadedCodeSentinelConfig
 ): Promise<ValidationReport> {
   const startedAt =
     new Date().toISOString();
@@ -3111,6 +3370,8 @@ export async function validateProject(
     projectPath,
 
     packageManager,
+
+    configuration,
 
     results,
 

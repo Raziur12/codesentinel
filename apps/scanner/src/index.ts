@@ -239,7 +239,8 @@ async function scanProject(
     await validateProject(
       projectPath,
       validationPlan.commands,
-      validationPlan.packageManager
+      validationPlan.packageManager,
+      validationPlan.configuration
     );
 
 

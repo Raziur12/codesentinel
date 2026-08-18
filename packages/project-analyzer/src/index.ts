@@ -156,6 +156,7 @@ function detectConfiguration(
       /^\.stylelintrc(?:\.(js|cjs|json|yaml|yml))?$/i.test(basename) ||
       [
         "package.json",
+        ".codesentinel.json",
         ".env",
         ".env.example",
         "vite.config.ts",

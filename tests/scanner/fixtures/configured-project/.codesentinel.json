@@ -1,0 +1,12 @@
+{
+  "validation": {
+    "build": false,
+    "test": true,
+    "lint": false,
+    "typeCheck": false
+  },
+  "severity": {},
+  "ignore": [],
+  "include": [],
+  "exclude": []
+}
