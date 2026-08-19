@@ -14,6 +14,7 @@ import {
 import {
   calculateProjectHealthScore,
   createAiAnalysisInput,
+  createAiRootCauseAnalysis,
   deduplicateDetections,
   createTechnologyProfile
 } from "@codesentinel/scanner-core";
@@ -397,6 +398,11 @@ async function scanProject(
         completedAt
     });
 
+  const aiRootCause =
+    createAiRootCauseAnalysis(
+      ai
+    );
+
 
   /*
    * 7. Save CodeSentinel artifacts
@@ -484,6 +490,23 @@ async function scanProject(
 
 
   /*
+   * Save AI root-cause analysis
+   */
+  await fs.writeFile(
+    path.join(
+      outputDirectory,
+      "ai-root-cause-analysis.json"
+    ),
+    JSON.stringify(
+      aiRootCause,
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+
+  /*
    * Save validation report
    */
   await fs.writeFile(
@@ -512,6 +535,7 @@ async function scanProject(
     dependencyAnalysis,
     health,
     ai,
+    aiRootCause,
 
     validation:
       validationSummary,

@@ -46,6 +46,8 @@ export interface JsonScanOutput {
 
     ai: NonNullable<ScanResult["ai"]>;
 
+    aiRootCause: NonNullable<ScanResult["aiRootCause"]>;
+
     validation: ValidationReport;
 
     findings: ValidationReport["findings"];
@@ -100,6 +102,9 @@ export class ConsoleReporter {
     const ai =
       execution.result.ai;
 
+    const aiRootCause =
+      execution.result.aiRootCause;
+
     if (
       health
     ) {
@@ -124,6 +129,14 @@ export class ConsoleReporter {
     ) {
       console.log(
         `AI Analysis Input: ${ai.findings.length} finding(s), ${ai.warnings.length} warning(s), structured context ready`
+      );
+    }
+
+    if (
+      aiRootCause
+    ) {
+      console.log(
+        `AI Root-Cause Analysis: ${aiRootCause.analyses.length} finding(s) explained`
       );
     }
 
@@ -266,6 +279,39 @@ export class JsonReporter {
               [],
             warnings:
               []
+          },
+        aiRootCause:
+          execution.result.aiRootCause ?? {
+            schemaVersion:
+              "1.0.0",
+            generatedAt:
+              execution.result.completedAt,
+            purpose:
+              "ai-root-cause-analysis",
+            guardrails:
+              {
+                deterministicValidationIsAuthoritative:
+                  true,
+                doNotReplaceValidation:
+                  true,
+                useStructuredFindingsBeforeTerminalOutput:
+                  true,
+                requireEvidenceLabels:
+                  [
+                    "confirmed",
+                    "inferred",
+                    "uncertain"
+                  ]
+              },
+            analyses:
+              [],
+            skipped:
+              {
+                reason:
+                  "Root-cause analysis was not calculated",
+                count:
+                  0
+              }
           },
         validation:
           execution.validationReport,

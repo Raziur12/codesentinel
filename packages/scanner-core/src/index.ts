@@ -305,6 +305,47 @@ export interface AiAnalysisInput {
   warnings: AiFindingInput[];
 }
 
+export type AiEvidenceLabel =
+  | "confirmed"
+  | "inferred"
+  | "uncertain";
+
+export interface AiExplanationSection {
+  label: AiEvidenceLabel;
+  text: string;
+  evidence: string[];
+}
+
+export interface AiFindingRootCauseAnalysis {
+  findingId: string;
+  severity: FindingSeverity;
+  category: FindingCategory;
+  code?: string;
+  title: string;
+  location?: {
+    file?: string;
+    line?: number;
+    column?: number;
+  };
+  rootCause: AiExplanationSection;
+  whyItHappened: AiExplanationSection;
+  codeCausedIt: AiExplanationSection;
+  howToFix: AiExplanationSection;
+  potentialSideEffects: AiExplanationSection;
+}
+
+export interface AiRootCauseAnalysis {
+  schemaVersion: "1.0.0";
+  generatedAt: string;
+  purpose: "ai-root-cause-analysis";
+  guardrails: AiAnalysisInput["guardrails"];
+  analyses: AiFindingRootCauseAnalysis[];
+  skipped: {
+    reason: string;
+    count: number;
+  };
+}
+
 export interface HealthValidationResult {
   name: string;
   status: HealthFactorStatus;
@@ -451,6 +492,8 @@ export interface ScanResult {
 
   ai?: AiAnalysisInput;
 
+  aiRootCause?: AiRootCauseAnalysis;
+
   validation?: ValidationSummary;
 
   startedAt: string;
@@ -561,6 +604,360 @@ export function createAiAnalysisInput(
       input.warnings.map(
         normalizeAiFinding
       )
+  };
+}
+
+function createExplanationSection(
+  label: AiEvidenceLabel,
+  text: string,
+  evidence: string[]
+): AiExplanationSection {
+  return {
+    label,
+    text,
+    evidence
+  };
+}
+
+function getFindingLocationText(
+  finding: AiFindingInput
+): string | undefined {
+  if (
+    !finding.file
+  ) {
+    return undefined;
+  }
+
+  if (
+    finding.line === undefined
+  ) {
+    return finding.file;
+  }
+
+  if (
+    finding.column === undefined
+  ) {
+    return `${finding.file}:${finding.line}`;
+  }
+
+  return `${finding.file}:${finding.line}:${finding.column}`;
+}
+
+function getFindingEvidence(
+  finding: AiFindingInput
+): string[] {
+  return [
+    finding.code
+      ? `Code: ${finding.code}`
+      : undefined,
+    getFindingLocationText(
+      finding
+    )
+      ? `Location: ${getFindingLocationText(finding)}`
+      : undefined,
+    finding.evidence
+      ? `Evidence: ${finding.evidence}`
+      : undefined,
+    `Message: ${finding.message}`,
+    `Source: ${finding.source}`,
+    `Confidence: ${finding.confidence}`
+  ].filter(
+    (item): item is string =>
+      Boolean(
+        item
+      )
+  );
+}
+
+function explainTypeScriptFinding(
+  finding: AiFindingInput,
+  evidence: string[]
+): Omit<
+  AiFindingRootCauseAnalysis,
+  "findingId" | "severity" | "category" | "code" | "title" | "location"
+> {
+  const location =
+    getFindingLocationText(
+      finding
+    ) ?? "the reported TypeScript location";
+
+  return {
+    rootCause:
+      createExplanationSection(
+        "confirmed",
+        `TypeScript reported ${finding.code ?? "a type-check error"} at ${location}.`,
+        evidence
+      ),
+    whyItHappened:
+      createExplanationSection(
+        "inferred",
+        "The code shape does not match the type contract expected by the TypeScript compiler.",
+        evidence
+      ),
+    codeCausedIt:
+      createExplanationSection(
+        finding.file
+          ? "confirmed"
+          : "uncertain",
+        finding.file
+          ? `The relevant code is in ${location}.`
+          : "The validation output did not include a concrete source file.",
+        evidence
+      ),
+    howToFix:
+      createExplanationSection(
+        finding.suggestion
+          ? "confirmed"
+          : "inferred",
+        finding.suggestion ??
+          "Update the value, type annotation, or API usage so the assigned value matches the expected type.",
+        evidence
+      ),
+    potentialSideEffects:
+      createExplanationSection(
+        "inferred",
+        "Changing a type or value can affect callers that rely on the current shape. Re-run type-check, tests, and build after the fix.",
+        evidence
+      )
+  };
+}
+
+function explainSecretFinding(
+  finding: AiFindingInput,
+  evidence: string[]
+): Omit<
+  AiFindingRootCauseAnalysis,
+  "findingId" | "severity" | "category" | "code" | "title" | "location"
+> {
+  const location =
+    getFindingLocationText(
+      finding
+    ) ?? "the reported source location";
+
+  return {
+    rootCause:
+      createExplanationSection(
+        "confirmed",
+        `A high-confidence secret pattern was detected at ${location}.`,
+        evidence
+      ),
+    whyItHappened:
+      createExplanationSection(
+        "inferred",
+        "A credential-like value appears to have been committed or generated into source-controlled project files.",
+        evidence
+      ),
+    codeCausedIt:
+      createExplanationSection(
+        finding.file
+          ? "confirmed"
+          : "uncertain",
+        finding.file
+          ? `The exposed value is in ${location}.`
+          : "The detector did not provide a concrete file location.",
+        evidence
+      ),
+    howToFix:
+      createExplanationSection(
+        "confirmed",
+        finding.suggestion ??
+          "Remove the credential from source control, move it to a secret manager or environment variable, and rotate the exposed value.",
+        evidence
+      ),
+    potentialSideEffects:
+      createExplanationSection(
+        "inferred",
+        "Rotating the credential may require updating deployment, CI, or runtime secret configuration before the old value is revoked.",
+        evidence
+      )
+  };
+}
+
+function explainSecurityFinding(
+  finding: AiFindingInput,
+  evidence: string[]
+): Omit<
+  AiFindingRootCauseAnalysis,
+  "findingId" | "severity" | "category" | "code" | "title" | "location"
+> {
+  const packageName =
+    typeof finding.metadata?.packageName === "string"
+      ? finding.metadata.packageName
+      : "the affected package";
+
+  return {
+    rootCause:
+      createExplanationSection(
+        "confirmed",
+        `A security issue was reported for ${packageName}.`,
+        evidence
+      ),
+    whyItHappened:
+      createExplanationSection(
+        "inferred",
+        "The dependency graph includes a package version that matches a known vulnerable range.",
+        evidence
+      ),
+    codeCausedIt:
+      createExplanationSection(
+        "inferred",
+        "The dependency declaration or lockfile selection brought the vulnerable package into the project.",
+        evidence
+      ),
+    howToFix:
+      createExplanationSection(
+        finding.suggestion
+          ? "confirmed"
+          : "inferred",
+        finding.suggestion ??
+          "Upgrade, patch, or replace the vulnerable dependency and re-run security validation.",
+        evidence
+      ),
+    potentialSideEffects:
+      createExplanationSection(
+        "inferred",
+        "Dependency upgrades can change runtime behavior or transitive package versions. Re-run tests, build, and audit after updating.",
+        evidence
+      )
+  };
+}
+
+function explainGenericFinding(
+  finding: AiFindingInput,
+  evidence: string[]
+): Omit<
+  AiFindingRootCauseAnalysis,
+  "findingId" | "severity" | "category" | "code" | "title" | "location"
+> {
+  const location =
+    getFindingLocationText(
+      finding
+    );
+
+  return {
+    rootCause:
+      createExplanationSection(
+        "confirmed",
+        finding.message,
+        evidence
+      ),
+    whyItHappened:
+      createExplanationSection(
+        "uncertain",
+        "The structured finding does not contain enough category-specific context to prove the deeper cause.",
+        evidence
+      ),
+    codeCausedIt:
+      createExplanationSection(
+        location
+          ? "confirmed"
+          : "uncertain",
+        location
+          ? `The finding points to ${location}.`
+          : "No exact source location was provided.",
+        evidence
+      ),
+    howToFix:
+      createExplanationSection(
+        finding.suggestion
+          ? "confirmed"
+          : "uncertain",
+        finding.suggestion ??
+          "Use the finding message and validation output to identify the smallest safe change, then re-run validation.",
+        evidence
+      ),
+    potentialSideEffects:
+      createExplanationSection(
+        "uncertain",
+        "Side effects depend on the code path changed. Re-run the relevant validator and tests after editing.",
+        evidence
+      )
+  };
+}
+
+function explainFinding(
+  finding: AiFindingInput
+): AiFindingRootCauseAnalysis {
+  const evidence =
+    getFindingEvidence(
+      finding
+    );
+
+  const sections =
+    finding.category === "type-check" ||
+    finding.code?.startsWith("TS")
+      ? explainTypeScriptFinding(
+          finding,
+          evidence
+        )
+      : finding.category === "secret"
+        ? explainSecretFinding(
+            finding,
+            evidence
+          )
+        : finding.category === "security"
+          ? explainSecurityFinding(
+              finding,
+              evidence
+            )
+          : explainGenericFinding(
+              finding,
+              evidence
+            );
+
+  return {
+    findingId:
+      finding.id,
+    severity:
+      finding.severity,
+    category:
+      finding.category,
+    code:
+      finding.code,
+    title:
+      finding.title,
+    location:
+      finding.file ||
+      finding.line !== undefined ||
+      finding.column !== undefined
+        ? {
+            file:
+              finding.file,
+            line:
+              finding.line,
+            column:
+              finding.column
+          }
+        : undefined,
+    ...sections
+  };
+}
+
+export function createAiRootCauseAnalysis(
+  input: AiAnalysisInput
+): AiRootCauseAnalysis {
+  return {
+    schemaVersion:
+      "1.0.0",
+    generatedAt:
+      input.generatedAt,
+    purpose:
+      "ai-root-cause-analysis",
+    guardrails:
+      input.guardrails,
+    analyses:
+      input.findings.map(
+        explainFinding
+      ),
+    skipped:
+      {
+        reason:
+          input.findings.length === 0
+            ? "No findings available for root-cause analysis"
+            : "Only active findings are analyzed; warnings remain in the AI analysis input",
+        count:
+          input.warnings.length
+      }
   };
 }
 
