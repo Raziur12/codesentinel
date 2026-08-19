@@ -256,7 +256,13 @@ function sendJson(
     status,
     {
       "content-type":
-        "application/json; charset=utf-8"
+        "application/json; charset=utf-8",
+      "access-control-allow-origin":
+        "*",
+      "access-control-allow-methods":
+        "GET,POST,OPTIONS",
+      "access-control-allow-headers":
+        "content-type"
     }
   );
 
@@ -657,6 +663,17 @@ function getRouteParts(
 export async function handleApiRequest(
   request: http.IncomingMessage
 ): Promise<ApiResponse> {
+  if (
+    request.method === "OPTIONS"
+  ) {
+    return {
+      status:
+        204,
+      body:
+        null
+    };
+  }
+
   const parts =
     getRouteParts(
       request.url

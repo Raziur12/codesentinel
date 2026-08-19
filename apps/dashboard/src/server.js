@@ -1,0 +1,55 @@
+import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const sourceFile = fileURLToPath(import.meta.url);
+const dashboardRoot = path.resolve(path.dirname(sourceFile), "..");
+const publicDirectory = path.join(dashboardRoot, "public");
+
+const contentTypes = new Map([
+  [".html", "text/html; charset=utf-8"],
+  [".css", "text/css; charset=utf-8"],
+  [".js", "text/javascript; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".svg", "image/svg+xml"]
+]);
+
+function getContentType(filePath) {
+  return contentTypes.get(path.extname(filePath)) ?? "application/octet-stream";
+}
+
+function resolvePublicPath(requestUrl) {
+  const url = new URL(requestUrl ?? "/", "http://localhost");
+  const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
+  const requestedPath = path.resolve(publicDirectory, `.${pathname}`);
+
+  if (!requestedPath.startsWith(publicDirectory)) {
+    return path.join(publicDirectory, "index.html");
+  }
+
+  return requestedPath;
+}
+
+const server = http.createServer(async (request, response) => {
+  const filePath = resolvePublicPath(request.url);
+
+  try {
+    const content = await fs.readFile(filePath);
+    response.writeHead(200, {
+      "content-type": getContentType(filePath)
+    });
+    response.end(content);
+  } catch {
+    response.writeHead(404, {
+      "content-type": "application/json; charset=utf-8"
+    });
+    response.end(JSON.stringify({ error: "Dashboard asset not found" }));
+  }
+});
+
+const port = Number(process.env.PORT ?? 4318);
+
+server.listen(port, () => {
+  console.log(`CodeSentinel Dashboard listening on http://localhost:${port}`);
+});
