@@ -12,6 +12,7 @@ import {
 } from "@codesentinel/project-analyzer";
 
 import {
+  calculateProjectHealthScore,
   deduplicateDetections,
   createTechnologyProfile
 } from "@codesentinel/scanner-core";
@@ -333,6 +334,14 @@ async function scanProject(
       validationPlan.configuration
     );
 
+  const health =
+    calculateProjectHealthScore({
+      projectStructure,
+      dependencyAnalysis,
+      validation:
+        validationReport
+    });
+
 
   /*
    * 7. Save CodeSentinel artifacts
@@ -386,6 +395,23 @@ async function scanProject(
 
 
   /*
+   * Save health score
+   */
+  await fs.writeFile(
+    path.join(
+      outputDirectory,
+      "health-score.json"
+    ),
+    JSON.stringify(
+      health,
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+
+  /*
    * Save validation report
    */
   await fs.writeFile(
@@ -416,6 +442,7 @@ async function scanProject(
     technologies,
     technologyProfile,
     dependencyAnalysis,
+    health,
 
     validation: {
       passed:

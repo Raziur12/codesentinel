@@ -229,6 +229,53 @@ export interface DependencyAnalysis {
   peerDependencyConflicts: DependencyIssue[];
 }
 
+export type HealthFactorName =
+  | "build"
+  | "tests"
+  | "type-safety"
+  | "lint"
+  | "dependencies"
+  | "security"
+  | "configuration"
+  | "architecture";
+
+export type HealthFactorStatus =
+  | "passed"
+  | "warning"
+  | "failed"
+  | "skipped";
+
+export interface HealthFactor {
+  name: HealthFactorName;
+  label: string;
+  status: HealthFactorStatus;
+  score: number;
+  maxScore: number;
+  deductions: number;
+  summary: string;
+  evidence: string[];
+}
+
+export interface ProjectHealthScore {
+  score: number;
+  maxScore: number;
+  grade: "A" | "B" | "C" | "D" | "F";
+  summary: string;
+  factors: HealthFactor[];
+}
+
+export interface HealthValidationResult {
+  name: string;
+  status: HealthFactorStatus;
+  category: FindingCategory;
+  skipReason?: string;
+}
+
+export interface HealthValidationReport {
+  results: HealthValidationResult[];
+  findings: CommonFinding[];
+  warnings: CommonFinding[];
+}
 
 export interface ValidationSummary {
   passed: boolean;
@@ -359,10 +406,467 @@ export interface ScanResult {
 
   dependencyAnalysis?: DependencyAnalysis;
 
+  health?: ProjectHealthScore;
+
   validation?: ValidationSummary;
 
   startedAt: string;
   completedAt: string;
+}
+
+function clampScore(
+  value: number
+): number {
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        value
+      )
+    )
+  );
+}
+
+function getHealthGrade(
+  score: number
+): ProjectHealthScore["grade"] {
+  if (
+    score >= 90
+  ) {
+    return "A";
+  }
+
+  if (
+    score >= 80
+  ) {
+    return "B";
+  }
+
+  if (
+    score >= 70
+  ) {
+    return "C";
+  }
+
+  if (
+    score >= 60
+  ) {
+    return "D";
+  }
+
+  return "F";
+}
+
+function createHealthFactor(
+  input: Omit<HealthFactor, "score" | "deductions">
+): HealthFactor {
+  const ratioByStatus:
+    Record<HealthFactorStatus, number> = {
+    passed:
+      1,
+    warning:
+      0.65,
+    skipped:
+      0.5,
+    failed:
+      0
+  };
+
+  const score =
+    Math.round(
+      input.maxScore *
+      ratioByStatus[input.status]
+    );
+
+  return {
+    ...input,
+    score,
+    deductions:
+      input.maxScore - score
+  };
+}
+
+function getValidationResult(
+  validation: HealthValidationReport,
+  category: FindingCategory
+): HealthValidationResult | undefined {
+  return validation.results.find(
+    result =>
+      result.category === category
+  );
+}
+
+function createValidationHealthFactor(
+  validation: HealthValidationReport,
+  category: FindingCategory,
+  name: HealthFactorName,
+  label: string,
+  maxScore: number
+): HealthFactor {
+  const result =
+    getValidationResult(
+      validation,
+      category
+    );
+
+  const status =
+    result?.status ?? "skipped";
+
+  const evidence =
+    result
+      ? [
+          `${result.name}: ${result.status}`,
+          ...(result.skipReason
+            ? [result.skipReason]
+            : [])
+        ]
+      : [`No ${label.toLowerCase()} validation result found`];
+
+  return createHealthFactor({
+    name,
+    label,
+    status,
+    maxScore,
+    summary:
+      status === "passed"
+        ? `${label} passed`
+        : status === "skipped"
+          ? `${label} was skipped`
+          : `${label} has ${status} status`,
+    evidence
+  });
+}
+
+function hasFindingsForCategories(
+  findings: CommonFinding[],
+  categories: FindingCategory[]
+): boolean {
+  return findings.some(
+    finding =>
+      categories.includes(
+        finding.category
+      )
+  );
+}
+
+function hasWarningsForCategories(
+  warnings: CommonFinding[],
+  categories: FindingCategory[]
+): boolean {
+  return warnings.some(
+    warning =>
+      categories.includes(
+        warning.category
+      )
+  );
+}
+
+function getDependencyHealthFactor(
+  dependencyAnalysis: DependencyAnalysis,
+  validation: HealthValidationReport
+): HealthFactor {
+  const dependencyIssues = [
+    ...dependencyAnalysis.outdatedDependencies,
+    ...dependencyAnalysis.dependencyConflicts,
+    ...dependencyAnalysis.peerDependencyConflicts
+  ];
+
+  const dependencyFailed =
+    hasFindingsForCategories(
+      validation.findings,
+      ["dependency", "engine"]
+    );
+
+  const dependencyWarnings =
+    dependencyIssues.length > 0 ||
+    dependencyAnalysis.engineRequirements.length > 0 ||
+    hasWarningsForCategories(
+      validation.warnings,
+      ["dependency", "engine"]
+    );
+
+  const status:
+    HealthFactorStatus =
+    dependencyFailed
+      ? "failed"
+      : dependencyWarnings
+        ? "warning"
+        : "passed";
+
+  return createHealthFactor({
+    name:
+      "dependencies",
+    label:
+      "Dependencies",
+    status,
+    maxScore:
+      15,
+    summary:
+      dependencyIssues.length > 0
+        ? `${dependencyIssues.length} dependency issue(s) detected`
+        : "Dependency analysis completed",
+    evidence: [
+      `Direct dependencies: ${dependencyAnalysis.directDependencies.length}`,
+      `Dev dependencies: ${dependencyAnalysis.devDependencies.length}`,
+      `Peer dependencies: ${dependencyAnalysis.peerDependencies.length}`,
+      `Optional dependencies: ${dependencyAnalysis.optionalDependencies.length}`,
+      `Dependency tree nodes: ${dependencyAnalysis.dependencyTree.length}`,
+      `Outdated/version drift signals: ${dependencyAnalysis.outdatedDependencies.length}`,
+      `Engine requirements: ${dependencyAnalysis.engineRequirements.length}`,
+      `Dependency conflicts: ${dependencyAnalysis.dependencyConflicts.length}`,
+      `Peer dependency conflicts: ${dependencyAnalysis.peerDependencyConflicts.length}`
+    ]
+  });
+}
+
+function getSecurityHealthFactor(
+  validation: HealthValidationReport
+): HealthFactor {
+  const securityCategories:
+    FindingCategory[] = [
+      "security",
+      "secret"
+    ];
+
+  const hasSecurityFindings =
+    hasFindingsForCategories(
+      validation.findings,
+      securityCategories
+    );
+
+  const hasSecurityWarnings =
+    hasWarningsForCategories(
+      validation.warnings,
+      securityCategories
+    );
+
+  const securityResult =
+    getValidationResult(
+      validation,
+      "security"
+    );
+
+  const secretResult =
+    getValidationResult(
+      validation,
+      "secret"
+    );
+
+  const status:
+    HealthFactorStatus =
+    hasSecurityFindings
+      ? "failed"
+      : hasSecurityWarnings
+        ? "warning"
+        : securityResult?.status === "skipped" &&
+            secretResult?.status === "skipped"
+          ? "skipped"
+          : "passed";
+
+  return createHealthFactor({
+    name:
+      "security",
+    label:
+      "Security",
+    status,
+    maxScore:
+      20,
+    summary:
+      status === "passed"
+        ? "Security checks passed"
+        : status === "skipped"
+          ? "Security checks were skipped"
+          : "Security findings detected",
+    evidence: [
+      `Security audit: ${securityResult?.status ?? "missing"}`,
+      `Secret detection: ${secretResult?.status ?? "missing"}`
+    ]
+  });
+}
+
+function getConfigurationHealthFactor(
+  projectStructure: ProjectStructure,
+  validation: HealthValidationReport
+): HealthFactor {
+  const hasConfigurationFindings =
+    hasFindingsForCategories(
+      validation.findings,
+      ["configuration"]
+    );
+
+  const hasConfigurationWarnings =
+    hasWarningsForCategories(
+      validation.warnings,
+      ["configuration"]
+    );
+
+  const hasConfigFiles =
+    projectStructure.configuration.length > 0;
+
+  const status:
+    HealthFactorStatus =
+    hasConfigurationFindings
+      ? "failed"
+      : hasConfigurationWarnings || !hasConfigFiles
+        ? "warning"
+        : "passed";
+
+  return createHealthFactor({
+    name:
+      "configuration",
+    label:
+      "Configuration",
+    status,
+    maxScore:
+      10,
+    summary:
+      hasConfigFiles
+        ? "Project configuration files detected"
+        : "No configuration files detected",
+    evidence:
+      hasConfigFiles
+        ? projectStructure.configuration.slice(
+            0,
+            10
+          )
+        : ["No configuration files detected"]
+  });
+}
+
+function getArchitectureHealthFactor(
+  projectStructure: ProjectStructure
+): HealthFactor {
+  const evidence: string[] = [
+    `Frontend detected: ${projectStructure.frontend}`,
+    `Backend detected: ${projectStructure.backend}`,
+    `Tests detected: ${projectStructure.tests}`,
+    `Package files: ${projectStructure.packageFiles.length}`,
+    `Infrastructure files: ${projectStructure.infrastructure.length}`
+  ];
+
+  const hasApplicationShape =
+    projectStructure.frontend ||
+    projectStructure.backend;
+
+  const status:
+    HealthFactorStatus =
+    hasApplicationShape &&
+    projectStructure.tests &&
+    projectStructure.packageFiles.length > 0
+      ? "passed"
+      : hasApplicationShape ||
+          projectStructure.packageFiles.length > 0
+        ? "warning"
+        : "skipped";
+
+  return createHealthFactor({
+    name:
+      "architecture",
+    label:
+      "Architecture",
+    status,
+    maxScore:
+      5,
+    summary:
+      status === "passed"
+        ? "Project structure has application, package, and test signals"
+        : status === "warning"
+          ? "Project structure has partial architecture signals"
+          : "No architecture signals detected",
+    evidence
+  });
+}
+
+export function calculateProjectHealthScore(
+  input: {
+    projectStructure: ProjectStructure;
+    dependencyAnalysis: DependencyAnalysis;
+    validation: HealthValidationReport;
+  }
+): ProjectHealthScore {
+  const factors: HealthFactor[] = [
+    createValidationHealthFactor(
+      input.validation,
+      "build",
+      "build",
+      "Build",
+      15
+    ),
+    createValidationHealthFactor(
+      input.validation,
+      "test",
+      "tests",
+      "Tests",
+      15
+    ),
+    createValidationHealthFactor(
+      input.validation,
+      "type-check",
+      "type-safety",
+      "Type Safety",
+      10
+    ),
+    createValidationHealthFactor(
+      input.validation,
+      "lint",
+      "lint",
+      "Lint",
+      10
+    ),
+    getDependencyHealthFactor(
+      input.dependencyAnalysis,
+      input.validation
+    ),
+    getSecurityHealthFactor(
+      input.validation
+    ),
+    getConfigurationHealthFactor(
+      input.projectStructure,
+      input.validation
+    ),
+    getArchitectureHealthFactor(
+      input.projectStructure
+    )
+  ];
+
+  const score =
+    clampScore(
+      factors.reduce(
+        (total, factor) =>
+          total + factor.score,
+        0
+      )
+    );
+
+  const failedFactors =
+    factors.filter(
+      factor =>
+        factor.status === "failed"
+    ).length;
+
+  const warningFactors =
+    factors.filter(
+      factor =>
+        factor.status === "warning"
+    ).length;
+
+  return {
+    score,
+    maxScore:
+      100,
+    grade:
+      getHealthGrade(
+        score
+      ),
+    summary:
+      failedFactors > 0
+        ? `${failedFactors} failed factor(s), ${warningFactors} warning factor(s)`
+        : warningFactors > 0
+          ? `${warningFactors} warning factor(s)`
+          : "All health factors passed",
+    factors
+  };
 }
 
 /**

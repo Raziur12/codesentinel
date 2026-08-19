@@ -42,6 +42,8 @@ export interface JsonScanOutput {
 
     dependencyAnalysis: NonNullable<ScanResult["dependencyAnalysis"]>;
 
+    health: NonNullable<ScanResult["health"]>;
+
     validation: ValidationReport;
 
     findings: ValidationReport["findings"];
@@ -89,6 +91,28 @@ export class ConsoleReporter {
 
     const dependencies =
       execution.result.dependencyAnalysis;
+
+    const health =
+      execution.result.health;
+
+    if (
+      health
+    ) {
+      console.log(
+        `CodeSentinel Health Score: ${health.score}/${health.maxScore} (${health.grade})`
+      );
+
+      console.log(
+        [
+          `Build: ${health.factors.find(factor => factor.name === "build")?.status ?? "unknown"}`,
+          `Tests: ${health.factors.find(factor => factor.name === "tests")?.status ?? "unknown"}`,
+          `Type Safety: ${health.factors.find(factor => factor.name === "type-safety")?.status ?? "unknown"}`,
+          `Lint: ${health.factors.find(factor => factor.name === "lint")?.status ?? "unknown"}`,
+          `Dependencies: ${health.factors.find(factor => factor.name === "dependencies")?.status ?? "unknown"}`,
+          `Security: ${health.factors.find(factor => factor.name === "security")?.status ?? "unknown"}`
+        ].join(" | ")
+      );
+    }
 
     if (
       dependencies
@@ -170,6 +194,19 @@ export class JsonReporter {
             dependencyConflicts:
               [],
             peerDependencyConflicts:
+              []
+          },
+        health:
+          execution.result.health ?? {
+            score:
+              0,
+            maxScore:
+              100,
+            grade:
+              "F",
+            summary:
+              "Health score was not calculated",
+            factors:
               []
           },
         validation:
