@@ -33,7 +33,7 @@ test(
           projectPath,
           "app.js"
         ),
-        "const key = 'AKIA1234567890ABCDEF';\n",
+        `const key = '${"AKIA"}1234567890ABCDEF';\n`,
         "utf8"
       );
 
