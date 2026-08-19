@@ -181,6 +181,54 @@ export interface ProjectStructure {
   infrastructure: string[];
 }
 
+export type DependencyScope =
+  | "direct"
+  | "dev"
+  | "peer"
+  | "optional";
+
+export interface DependencyEntry {
+  name: string;
+  specifier: string;
+  scope: DependencyScope;
+  installedVersion?: string;
+}
+
+export interface DependencyTreeNode {
+  name: string;
+  version?: string;
+  path: string;
+  dependencies: string[];
+  dev: boolean;
+  optional: boolean;
+  peer: boolean;
+  engines?: Record<string, string>;
+}
+
+export interface DependencyIssue {
+  code: string;
+  title: string;
+  message: string;
+  packageName?: string;
+  severity: FindingSeverity;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DependencyAnalysis {
+  packageManager: PackageManagerName;
+  packageFile?: string;
+  lockfile?: string;
+  directDependencies: DependencyEntry[];
+  devDependencies: DependencyEntry[];
+  peerDependencies: DependencyEntry[];
+  optionalDependencies: DependencyEntry[];
+  dependencyTree: DependencyTreeNode[];
+  outdatedDependencies: DependencyIssue[];
+  engineRequirements: DependencyIssue[];
+  dependencyConflicts: DependencyIssue[];
+  peerDependencyConflicts: DependencyIssue[];
+}
+
 
 export interface ValidationSummary {
   passed: boolean;
@@ -308,6 +356,8 @@ export interface ScanResult {
   technologies: DetectionResult[];
 
   technologyProfile: TechnologyProfile;
+
+  dependencyAnalysis?: DependencyAnalysis;
 
   validation?: ValidationSummary;
 

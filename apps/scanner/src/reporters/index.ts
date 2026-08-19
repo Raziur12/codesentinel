@@ -40,6 +40,8 @@ export interface JsonScanOutput {
 
     technologyProfile: ScanResult["technologyProfile"];
 
+    dependencyAnalysis: NonNullable<ScanResult["dependencyAnalysis"]>;
+
     validation: ValidationReport;
 
     findings: ValidationReport["findings"];
@@ -85,6 +87,25 @@ export class ConsoleReporter {
     const summary =
       execution.result.validation;
 
+    const dependencies =
+      execution.result.dependencyAnalysis;
+
+    if (
+      dependencies
+    ) {
+      console.log(
+        [
+          `Dependencies: direct ${dependencies.directDependencies.length}`,
+          `dev ${dependencies.devDependencies.length}`,
+          `peer ${dependencies.peerDependencies.length}`,
+          `optional ${dependencies.optionalDependencies.length}`,
+          `tree ${dependencies.dependencyTree.length}`,
+          `outdated ${dependencies.outdatedDependencies.length}`,
+          `engines ${dependencies.engineRequirements.length}`
+        ].join(" | ")
+      );
+    }
+
     console.log(
       `Summary: ${summary?.passed ? "passed" : "failed"}`
     );
@@ -128,6 +149,29 @@ export class JsonReporter {
         },
         technologyProfile:
           execution.result.technologyProfile,
+        dependencyAnalysis:
+          execution.result.dependencyAnalysis ?? {
+            packageManager:
+              "npm",
+            directDependencies:
+              [],
+            devDependencies:
+              [],
+            peerDependencies:
+              [],
+            optionalDependencies:
+              [],
+            dependencyTree:
+              [],
+            outdatedDependencies:
+              [],
+            engineRequirements:
+              [],
+            dependencyConflicts:
+              [],
+            peerDependencyConflicts:
+              []
+          },
         validation:
           execution.validationReport,
         findings:

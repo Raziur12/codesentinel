@@ -7,6 +7,7 @@ import {
 } from "@codesentinel/validation-engine";
 
 import {
+  analyzeDependencies,
   analyzeProject
 } from "@codesentinel/project-analyzer";
 
@@ -276,6 +277,11 @@ async function scanProject(
       projectPath
     );
 
+  const dependencyAnalysis =
+    await analyzeDependencies(
+      projectPath
+    );
+
 
   /*
    * 3. Run every detector exactly once
@@ -363,6 +369,23 @@ async function scanProject(
 
 
   /*
+   * Save dependency analysis
+   */
+  await fs.writeFile(
+    path.join(
+      outputDirectory,
+      "dependency-analysis.json"
+    ),
+    JSON.stringify(
+      dependencyAnalysis,
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+
+  /*
    * Save validation report
    */
   await fs.writeFile(
@@ -392,6 +415,7 @@ async function scanProject(
     projectStructure,
     technologies,
     technologyProfile,
+    dependencyAnalysis,
 
     validation: {
       passed:
