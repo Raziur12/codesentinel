@@ -50,6 +50,8 @@ export interface JsonScanOutput {
 
     aiFixSuggestions: NonNullable<ScanResult["aiFixSuggestions"]>;
 
+    aiProvider: NonNullable<ScanResult["aiProvider"]>;
+
     validation: ValidationReport;
 
     findings: ValidationReport["findings"];
@@ -109,6 +111,17 @@ export class ConsoleReporter {
 
     const aiFixSuggestions =
       execution.result.aiFixSuggestions;
+
+    const aiProvider =
+      execution.result.aiProvider;
+
+    if (
+      aiProvider
+    ) {
+      console.log(
+        `AI Provider: ${aiProvider.name} (${aiProvider.id})`
+      );
+    }
 
     if (
       health
@@ -362,6 +375,13 @@ export class JsonReporter {
                 count:
                   0
               }
+          },
+        aiProvider:
+          execution.result.aiProvider ?? {
+            id:
+              "none",
+            name:
+              "No AI provider"
           },
         validation:
           execution.validationReport,

@@ -14,8 +14,7 @@ import {
 import {
   calculateProjectHealthScore,
   createAiAnalysisInput,
-  createAiFixSuggestions,
-  createAiRootCauseAnalysis,
+  createAiProvider,
   deduplicateDetections,
   createTechnologyProfile
 } from "@codesentinel/scanner-core";
@@ -57,6 +56,8 @@ interface CliOptions {
   dryRun: boolean;
 
   interactive: boolean;
+
+  aiProvider: string;
 }
 
 const EXIT_VALIDATION_PASSED =
@@ -105,6 +106,9 @@ function parseCliOptions(
   let interactive =
     false;
 
+  let aiProvider =
+    "local-deterministic";
+
   for (
     let index = 0;
     index < args.length;
@@ -134,6 +138,35 @@ function parseCliOptions(
     ) {
       interactive =
         true;
+      continue;
+    }
+
+    if (
+      arg === "--ai-provider"
+    ) {
+      aiProvider =
+        args[index + 1];
+
+      if (
+        !aiProvider
+      ) {
+        throw new InvalidInputError(
+          "--ai-provider requires a provider id"
+        );
+      }
+
+      index += 1;
+      continue;
+    }
+
+    if (
+      arg.startsWith("--ai-provider=")
+    ) {
+      aiProvider =
+        arg.slice(
+          "--ai-provider=".length
+        );
+
       continue;
     }
 
@@ -242,7 +275,9 @@ function parseCliOptions(
 
     dryRun,
 
-    interactive
+    interactive,
+
+    aiProvider
   };
 }
 
@@ -327,13 +362,15 @@ async function getFiles(
 async function scanProject(
   projectPath: string,
   plugins: ScannerPlugin[],
-  options: Pick<CliOptions, "fix" | "dryRun" | "interactive"> = {
+  options: Pick<CliOptions, "fix" | "dryRun" | "interactive" | "aiProvider"> = {
     fix:
       false,
     dryRun:
       false,
     interactive:
-      false
+      false,
+    aiProvider:
+      "local-deterministic"
   }
 ): Promise<ScanExecution> {
   const startedAt =
@@ -477,20 +514,23 @@ async function scanProject(
         completedAt
     });
 
+  const aiProvider =
+    createAiProvider(
+      options.aiProvider
+    );
+
   const aiRootCause =
-    createAiRootCauseAnalysis(
+    await aiProvider.analyzeFindings(
       ai
     );
 
   const aiFixSuggestions =
-    createAiFixSuggestions({
-      rootCauseAnalysis:
-        aiRootCause,
-      mode:
-        getAiFixMode(
-          options
-        )
-    });
+    await aiProvider.suggestFix(
+      aiRootCause,
+      getAiFixMode(
+        options
+      )
+    );
 
 
   /*
@@ -643,6 +683,13 @@ async function scanProject(
     ai,
     aiRootCause,
     aiFixSuggestions,
+    aiProvider:
+      {
+        id:
+          aiProvider.id,
+        name:
+          aiProvider.name
+      },
 
     validation:
       validationSummary,

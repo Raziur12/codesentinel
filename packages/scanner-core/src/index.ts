@@ -388,6 +388,56 @@ export interface AiFixSuggestions {
   };
 }
 
+export interface AiPatchPlan {
+  schemaVersion: "1.0.0";
+  generatedAt: string;
+  purpose: "ai-patch-plan";
+  provider: string;
+  patches: [];
+  skipped: {
+    reason: string;
+  };
+  guardrails: {
+    automaticPatchApplied: false;
+    requireExplicitConfirmation: true;
+    runValidationAfterPatch: true;
+    rollbackIfValidationWorsens: true;
+  };
+}
+
+export interface AiAnalysisBundle {
+  provider: string;
+  input: AiAnalysisInput;
+  rootCause: AiRootCauseAnalysis;
+  fixSuggestions: AiFixSuggestions;
+  patchPlan: AiPatchPlan;
+}
+
+export interface AiProvider {
+  id: string;
+  name: string;
+  capabilities: {
+    analyzeFindings: boolean;
+    explainFinding: boolean;
+    suggestFix: boolean;
+    generatePatch: boolean;
+  };
+  analyzeFindings(
+    input: AiAnalysisInput
+  ): Promise<AiRootCauseAnalysis>;
+  explainFinding(
+    finding: AiFindingInput,
+    context: AiAnalysisInput
+  ): Promise<AiFindingRootCauseAnalysis>;
+  suggestFix(
+    rootCauseAnalysis: AiRootCauseAnalysis,
+    mode?: AiFixMode
+  ): Promise<AiFixSuggestions>;
+  generatePatch(
+    fixSuggestions: AiFixSuggestions
+  ): Promise<AiPatchPlan>;
+}
+
 export interface HealthValidationResult {
   name: string;
   status: HealthFactorStatus;
@@ -537,6 +587,11 @@ export interface ScanResult {
   aiRootCause?: AiRootCauseAnalysis;
 
   aiFixSuggestions?: AiFixSuggestions;
+
+  aiProvider?: {
+    id: string;
+    name: string;
+  };
 
   validation?: ValidationSummary;
 
@@ -1151,6 +1206,255 @@ export function createAiFixSuggestions(
           input.rootCauseAnalysis.skipped.count
       }
   };
+}
+
+export function createEmptyPatchPlan(
+  input: {
+    generatedAt: string;
+    provider: string;
+    reason?: string;
+  }
+): AiPatchPlan {
+  return {
+    schemaVersion:
+      "1.0.0",
+    generatedAt:
+      input.generatedAt,
+    purpose:
+      "ai-patch-plan",
+    provider:
+      input.provider,
+    patches:
+      [],
+    skipped:
+      {
+        reason:
+          input.reason ??
+          "Patch generation is disabled until interactive confirmation and validation rollback are implemented"
+      },
+    guardrails:
+      {
+        automaticPatchApplied:
+          false,
+        requireExplicitConfirmation:
+          true,
+        runValidationAfterPatch:
+          true,
+        rollbackIfValidationWorsens:
+          true
+      }
+  };
+}
+
+export class LocalDeterministicAiProvider implements AiProvider {
+  id =
+    "local-deterministic";
+
+  name =
+    "Local deterministic AI provider";
+
+  capabilities = {
+    analyzeFindings:
+      true,
+    explainFinding:
+      true,
+    suggestFix:
+      true,
+    generatePatch:
+      false
+  };
+
+  async analyzeFindings(
+    input: AiAnalysisInput
+  ): Promise<AiRootCauseAnalysis> {
+    return createAiRootCauseAnalysis(
+      input
+    );
+  }
+
+  async explainFinding(
+    finding: AiFindingInput,
+    context: AiAnalysisInput
+  ): Promise<AiFindingRootCauseAnalysis> {
+    const analysis =
+      createAiRootCauseAnalysis({
+        ...context,
+        findings:
+          [finding],
+        warnings:
+          []
+      });
+
+    const result =
+      analysis.analyses[0];
+
+    if (
+      !result
+    ) {
+      throw new Error(
+        "Unable to explain finding"
+      );
+    }
+
+    return result;
+  }
+
+  async suggestFix(
+    rootCauseAnalysis: AiRootCauseAnalysis,
+    mode?: AiFixMode
+  ): Promise<AiFixSuggestions> {
+    return createAiFixSuggestions({
+      rootCauseAnalysis,
+      mode
+    });
+  }
+
+  async generatePatch(
+    fixSuggestions: AiFixSuggestions
+  ): Promise<AiPatchPlan> {
+    return createEmptyPatchPlan({
+      generatedAt:
+        fixSuggestions.generatedAt,
+      provider:
+        this.id
+    });
+  }
+}
+
+export class NoopAiProvider implements AiProvider {
+  id =
+    "none";
+
+  name =
+    "No AI provider";
+
+  capabilities = {
+    analyzeFindings:
+      false,
+    explainFinding:
+      false,
+    suggestFix:
+      false,
+    generatePatch:
+      false
+  };
+
+  async analyzeFindings(
+    input: AiAnalysisInput
+  ): Promise<AiRootCauseAnalysis> {
+    return {
+      schemaVersion:
+        "1.0.0",
+      generatedAt:
+        input.generatedAt,
+      purpose:
+        "ai-root-cause-analysis",
+      guardrails:
+        input.guardrails,
+      analyses:
+        [],
+      skipped:
+        {
+          reason:
+            "No AI provider is configured",
+          count:
+            input.findings.length + input.warnings.length
+        }
+    };
+  }
+
+  async explainFinding(
+    finding: AiFindingInput,
+    context: AiAnalysisInput
+  ): Promise<AiFindingRootCauseAnalysis> {
+    const analysis =
+      await this.analyzeFindings({
+        ...context,
+        findings:
+          [finding],
+        warnings:
+          []
+      });
+
+    const result =
+      analysis.analyses[0];
+
+    if (
+      !result
+    ) {
+      throw new Error(
+        "No AI provider is configured"
+      );
+    }
+
+    return result;
+  }
+
+  async suggestFix(
+    rootCauseAnalysis: AiRootCauseAnalysis
+  ): Promise<AiFixSuggestions> {
+    return {
+      schemaVersion:
+        "1.0.0",
+      generatedAt:
+        rootCauseAnalysis.generatedAt,
+      purpose:
+        "ai-fix-suggestions",
+      mode:
+        "suggestion-only",
+      guardrails:
+        {
+          suggestionOnly:
+            true,
+          automaticPatchApplied:
+            false,
+          showAffectedFilesBeforePatch:
+            true,
+          showDiffBeforePatch:
+            true,
+          requireExplicitConfirmation:
+            true,
+          runValidationAfterPatch:
+            true,
+          rollbackIfValidationWorsens:
+            true
+        },
+      suggestions:
+        [],
+      skipped:
+        {
+          reason:
+            "No AI provider is configured",
+          count:
+            rootCauseAnalysis.analyses.length
+        }
+    };
+  }
+
+  async generatePatch(
+    fixSuggestions: AiFixSuggestions
+  ): Promise<AiPatchPlan> {
+    return createEmptyPatchPlan({
+      generatedAt:
+        fixSuggestions.generatedAt,
+      provider:
+        this.id,
+      reason:
+        "No AI provider is configured"
+    });
+  }
+}
+
+export function createAiProvider(
+  providerId = "local-deterministic"
+): AiProvider {
+  if (
+    providerId === "none"
+  ) {
+    return new NoopAiProvider();
+  }
+
+  return new LocalDeterministicAiProvider();
 }
 
 function clampScore(
