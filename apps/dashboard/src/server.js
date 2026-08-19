@@ -50,6 +50,17 @@ const server = http.createServer(async (request, response) => {
 
 const port = Number(process.env.PORT ?? 4318);
 
+server.on("error", error => {
+  if (error.code === "EADDRINUSE") {
+    console.error(
+      `Port ${port} is already in use. Open http://localhost:${port} or run with PORT=4319.`
+    );
+    process.exit(1);
+  }
+
+  throw error;
+});
+
 server.listen(port, () => {
   console.log(`CodeSentinel Dashboard listening on http://localhost:${port}`);
 });
