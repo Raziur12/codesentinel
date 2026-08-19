@@ -48,6 +48,8 @@ export interface JsonScanOutput {
 
     aiRootCause: NonNullable<ScanResult["aiRootCause"]>;
 
+    aiFixSuggestions: NonNullable<ScanResult["aiFixSuggestions"]>;
+
     validation: ValidationReport;
 
     findings: ValidationReport["findings"];
@@ -105,6 +107,9 @@ export class ConsoleReporter {
     const aiRootCause =
       execution.result.aiRootCause;
 
+    const aiFixSuggestions =
+      execution.result.aiFixSuggestions;
+
     if (
       health
     ) {
@@ -137,6 +142,14 @@ export class ConsoleReporter {
     ) {
       console.log(
         `AI Root-Cause Analysis: ${aiRootCause.analyses.length} finding(s) explained`
+      );
+    }
+
+    if (
+      aiFixSuggestions
+    ) {
+      console.log(
+        `AI Fix Suggestions: ${aiFixSuggestions.suggestions.length} suggestion(s), mode ${aiFixSuggestions.mode}, no files modified`
       );
     }
 
@@ -309,6 +322,43 @@ export class JsonReporter {
               {
                 reason:
                   "Root-cause analysis was not calculated",
+                count:
+                  0
+              }
+          },
+        aiFixSuggestions:
+          execution.result.aiFixSuggestions ?? {
+            schemaVersion:
+              "1.0.0",
+            generatedAt:
+              execution.result.completedAt,
+            purpose:
+              "ai-fix-suggestions",
+            mode:
+              "suggestion-only",
+            guardrails:
+              {
+                suggestionOnly:
+                  true,
+                automaticPatchApplied:
+                  false,
+                showAffectedFilesBeforePatch:
+                  true,
+                showDiffBeforePatch:
+                  true,
+                requireExplicitConfirmation:
+                  true,
+                runValidationAfterPatch:
+                  true,
+                rollbackIfValidationWorsens:
+                  true
+              },
+            suggestions:
+              [],
+            skipped:
+              {
+                reason:
+                  "Fix suggestions were not calculated",
                 count:
                   0
               }

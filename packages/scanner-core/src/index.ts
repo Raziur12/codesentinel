@@ -346,6 +346,48 @@ export interface AiRootCauseAnalysis {
   };
 }
 
+export type AiFixMode =
+  | "suggestion-only"
+  | "dry-run"
+  | "interactive";
+
+export interface AiFixSuggestion {
+  findingId: string;
+  severity: FindingSeverity;
+  category: FindingCategory;
+  code?: string;
+  title: string;
+  affectedFiles: string[];
+  recommendedFix: AiExplanationSection;
+  suggestedAction: string;
+  diffPreview?: string;
+  requiresConfirmation: true;
+  validationRequiredAfterChange: true;
+  rollbackRequiredIfValidationWorsens: true;
+  automaticPatchApplied: false;
+}
+
+export interface AiFixSuggestions {
+  schemaVersion: "1.0.0";
+  generatedAt: string;
+  purpose: "ai-fix-suggestions";
+  mode: AiFixMode;
+  guardrails: {
+    suggestionOnly: true;
+    automaticPatchApplied: false;
+    showAffectedFilesBeforePatch: true;
+    showDiffBeforePatch: true;
+    requireExplicitConfirmation: true;
+    runValidationAfterPatch: true;
+    rollbackIfValidationWorsens: true;
+  };
+  suggestions: AiFixSuggestion[];
+  skipped: {
+    reason: string;
+    count: number;
+  };
+}
+
 export interface HealthValidationResult {
   name: string;
   status: HealthFactorStatus;
@@ -493,6 +535,8 @@ export interface ScanResult {
   ai?: AiAnalysisInput;
 
   aiRootCause?: AiRootCauseAnalysis;
+
+  aiFixSuggestions?: AiFixSuggestions;
 
   validation?: ValidationSummary;
 
@@ -957,6 +1001,154 @@ export function createAiRootCauseAnalysis(
             : "Only active findings are analyzed; warnings remain in the AI analysis input",
         count:
           input.warnings.length
+      }
+  };
+}
+
+function getSuggestedAction(
+  analysis: AiFindingRootCauseAnalysis
+): string {
+  if (
+    analysis.category === "secret"
+  ) {
+    return "Remove the secret from source, move it to a secure runtime secret store, and rotate the exposed credential.";
+  }
+
+  if (
+    analysis.category === "security"
+  ) {
+    return analysis.howToFix.text;
+  }
+
+  if (
+    analysis.category === "type-check" ||
+    analysis.code?.startsWith("TS")
+  ) {
+    return analysis.howToFix.text;
+  }
+
+  return analysis.howToFix.text;
+}
+
+function getDiffPreview(
+  analysis: AiFindingRootCauseAnalysis
+): string | undefined {
+  const file =
+    analysis.location?.file;
+
+  if (
+    !file
+  ) {
+    return undefined;
+  }
+
+  if (
+    analysis.category === "secret"
+  ) {
+    return [
+      `--- ${file}`,
+      `+++ ${file}`,
+      "@@ suggestion-only @@",
+      "- <hard-coded secret>",
+      "+ process.env.<SECRET_NAME>"
+    ].join("\n");
+  }
+
+  if (
+    analysis.category === "type-check" ||
+    analysis.code?.startsWith("TS")
+  ) {
+    return [
+      `--- ${file}`,
+      `+++ ${file}`,
+      "@@ suggestion-only @@",
+      "- <code that violates the reported type contract>",
+      "+ <code updated to match the expected type contract>"
+    ].join("\n");
+  }
+
+  return undefined;
+}
+
+export function createAiFixSuggestions(
+  input: {
+    rootCauseAnalysis: AiRootCauseAnalysis;
+    mode?: AiFixMode;
+  }
+): AiFixSuggestions {
+  const suggestions =
+    input.rootCauseAnalysis.analyses.map(
+      analysis => ({
+        findingId:
+          analysis.findingId,
+        severity:
+          analysis.severity,
+        category:
+          analysis.category,
+        code:
+          analysis.code,
+        title:
+          analysis.title,
+        affectedFiles:
+          analysis.location?.file
+            ? [analysis.location.file]
+            : [],
+        recommendedFix:
+          analysis.howToFix,
+        suggestedAction:
+          getSuggestedAction(
+            analysis
+          ),
+        diffPreview:
+          getDiffPreview(
+            analysis
+          ),
+        requiresConfirmation:
+          true as const,
+        validationRequiredAfterChange:
+          true as const,
+        rollbackRequiredIfValidationWorsens:
+          true as const,
+        automaticPatchApplied:
+          false as const
+      })
+    );
+
+  return {
+    schemaVersion:
+      "1.0.0",
+    generatedAt:
+      input.rootCauseAnalysis.generatedAt,
+    purpose:
+      "ai-fix-suggestions",
+    mode:
+      input.mode ?? "suggestion-only",
+    guardrails:
+      {
+        suggestionOnly:
+          true,
+        automaticPatchApplied:
+          false,
+        showAffectedFilesBeforePatch:
+          true,
+        showDiffBeforePatch:
+          true,
+        requireExplicitConfirmation:
+          true,
+        runValidationAfterPatch:
+          true,
+        rollbackIfValidationWorsens:
+          true
+      },
+    suggestions,
+    skipped:
+      {
+        reason:
+          suggestions.length === 0
+            ? "No active findings available for fix suggestions"
+            : "Automatic patch generation is disabled in this version",
+        count:
+          input.rootCauseAnalysis.skipped.count
       }
   };
 }

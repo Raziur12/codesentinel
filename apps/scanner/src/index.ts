@@ -14,12 +14,14 @@ import {
 import {
   calculateProjectHealthScore,
   createAiAnalysisInput,
+  createAiFixSuggestions,
   createAiRootCauseAnalysis,
   deduplicateDetections,
   createTechnologyProfile
 } from "@codesentinel/scanner-core";
 
 import type {
+  AiFixMode,
   ScanContext,
   ScanResult,
   ScannerPlugin
@@ -49,6 +51,12 @@ interface CliOptions {
   workspacePath?: string;
 
   format: "text" | "json";
+
+  fix: boolean;
+
+  dryRun: boolean;
+
+  interactive: boolean;
 }
 
 const EXIT_VALIDATION_PASSED =
@@ -88,6 +96,15 @@ function parseCliOptions(
     CliOptions["format"] =
       "text";
 
+  let fix =
+    false;
+
+  let dryRun =
+    false;
+
+  let interactive =
+    false;
+
   for (
     let index = 0;
     index < args.length;
@@ -95,6 +112,30 @@ function parseCliOptions(
   ) {
     const arg =
       args[index];
+
+    if (
+      arg === "--fix"
+    ) {
+      fix =
+        true;
+      continue;
+    }
+
+    if (
+      arg === "--dry-run"
+    ) {
+      dryRun =
+        true;
+      continue;
+    }
+
+    if (
+      arg === "--interactive"
+    ) {
+      interactive =
+        true;
+      continue;
+    }
 
     if (
       arg === "--workspace" ||
@@ -195,8 +236,38 @@ function parseCliOptions(
 
     workspacePath,
 
-    format
+    format,
+
+    fix,
+
+    dryRun,
+
+    interactive
   };
+}
+
+function getAiFixMode(
+  options: Pick<CliOptions, "fix" | "dryRun" | "interactive">
+): AiFixMode {
+  if (
+    options.interactive
+  ) {
+    return "interactive";
+  }
+
+  if (
+    options.dryRun
+  ) {
+    return "dry-run";
+  }
+
+  if (
+    options.fix
+  ) {
+    return "suggestion-only";
+  }
+
+  return "suggestion-only";
 }
 
 
@@ -255,7 +326,15 @@ async function getFiles(
 
 async function scanProject(
   projectPath: string,
-  plugins: ScannerPlugin[]
+  plugins: ScannerPlugin[],
+  options: Pick<CliOptions, "fix" | "dryRun" | "interactive"> = {
+    fix:
+      false,
+    dryRun:
+      false,
+    interactive:
+      false
+  }
 ): Promise<ScanExecution> {
   const startedAt =
     new Date().toISOString();
@@ -403,6 +482,16 @@ async function scanProject(
       ai
     );
 
+  const aiFixSuggestions =
+    createAiFixSuggestions({
+      rootCauseAnalysis:
+        aiRootCause,
+      mode:
+        getAiFixMode(
+          options
+        )
+    });
+
 
   /*
    * 7. Save CodeSentinel artifacts
@@ -507,6 +596,23 @@ async function scanProject(
 
 
   /*
+   * Save AI fix suggestions
+   */
+  await fs.writeFile(
+    path.join(
+      outputDirectory,
+      "ai-fix-suggestions.json"
+    ),
+    JSON.stringify(
+      aiFixSuggestions,
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+
+  /*
    * Save validation report
    */
   await fs.writeFile(
@@ -536,6 +642,7 @@ async function scanProject(
     health,
     ai,
     aiRootCause,
+    aiFixSuggestions,
 
     validation:
       validationSummary,
@@ -651,7 +758,8 @@ async function main(): Promise<number> {
             projectPath,
             [
               universalTechnologyPlugin
-            ]
+            ],
+            cliOptions
           )
       );
 
@@ -682,7 +790,8 @@ async function main(): Promise<number> {
       projectPath,
       [
         universalTechnologyPlugin
-      ]
+      ],
+      cliOptions
     );
 
   reporter.complete(
