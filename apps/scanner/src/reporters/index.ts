@@ -44,6 +44,8 @@ export interface JsonScanOutput {
 
     health: NonNullable<ScanResult["health"]>;
 
+    ai: NonNullable<ScanResult["ai"]>;
+
     validation: ValidationReport;
 
     findings: ValidationReport["findings"];
@@ -95,6 +97,9 @@ export class ConsoleReporter {
     const health =
       execution.result.health;
 
+    const ai =
+      execution.result.ai;
+
     if (
       health
     ) {
@@ -111,6 +116,14 @@ export class ConsoleReporter {
           `Dependencies: ${health.factors.find(factor => factor.name === "dependencies")?.status ?? "unknown"}`,
           `Security: ${health.factors.find(factor => factor.name === "security")?.status ?? "unknown"}`
         ].join(" | ")
+      );
+    }
+
+    if (
+      ai
+    ) {
+      console.log(
+        `AI Analysis Input: ${ai.findings.length} finding(s), ${ai.warnings.length} warning(s), structured context ready`
       );
     }
 
@@ -207,6 +220,51 @@ export class JsonReporter {
             summary:
               "Health score was not calculated",
             factors:
+              []
+          },
+        ai:
+          execution.result.ai ?? {
+            schemaVersion:
+              "1.0.0",
+            generatedAt:
+              execution.result.completedAt,
+            purpose:
+              "ai-analysis-input",
+            guardrails:
+              {
+                deterministicValidationIsAuthoritative:
+                  true,
+                doNotReplaceValidation:
+                  true,
+                useStructuredFindingsBeforeTerminalOutput:
+                  true,
+                requireEvidenceLabels:
+                  [
+                    "confirmed",
+                    "inferred",
+                    "uncertain"
+                  ]
+              },
+            project:
+              {
+                path:
+                  execution.result.projectPath,
+                filesScanned:
+                  execution.result.filesScanned,
+                structure:
+                  execution.result.projectStructure
+              },
+            technologyProfile:
+              execution.result.technologyProfile,
+            dependencyAnalysis:
+              execution.result.dependencyAnalysis,
+            health:
+              execution.result.health,
+            validation:
+              execution.result.validation,
+            findings:
+              [],
+            warnings:
               []
           },
         validation:

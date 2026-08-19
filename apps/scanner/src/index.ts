@@ -13,6 +13,7 @@ import {
 
 import {
   calculateProjectHealthScore,
+  createAiAnalysisInput,
   deduplicateDetections,
   createTechnologyProfile
 } from "@codesentinel/scanner-core";
@@ -342,6 +343,60 @@ async function scanProject(
         validationReport
     });
 
+  const completedAt =
+    new Date().toISOString();
+
+  const validationSummary = {
+    passed:
+      validationReport.passed,
+
+    total:
+      validationReport.results.length,
+
+    passedCount:
+      validationReport.results.filter(
+        result =>
+          result.status === "passed"
+      ).length,
+
+    failedCount:
+      validationReport.results.filter(
+        result =>
+          result.status === "failed"
+      ).length,
+
+    warningCount:
+      validationReport.results.filter(
+        result =>
+          result.status === "warning"
+      ).length,
+
+    skippedCount:
+      validationReport.results.filter(
+        result =>
+          result.status === "skipped"
+      ).length
+  };
+
+  const ai =
+    createAiAnalysisInput({
+      projectPath,
+      filesScanned:
+        files.length,
+      projectStructure,
+      technologyProfile,
+      dependencyAnalysis,
+      health,
+      validation:
+        validationSummary,
+      findings:
+        validationReport.findings,
+      warnings:
+        validationReport.warnings,
+      generatedAt:
+        completedAt
+    });
+
 
   /*
    * 7. Save CodeSentinel artifacts
@@ -412,6 +467,23 @@ async function scanProject(
 
 
   /*
+   * Save AI analysis input
+   */
+  await fs.writeFile(
+    path.join(
+      outputDirectory,
+      "ai-analysis-input.json"
+    ),
+    JSON.stringify(
+      ai,
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+
+  /*
    * Save validation report
    */
   await fs.writeFile(
@@ -431,10 +503,6 @@ async function scanProject(
   /*
    * 8. Create final scan result
    */
-  const completedAt =
-    new Date().toISOString();
-
-
   const result: ScanResult = {
     projectPath,
     filesScanned: files.length,
@@ -443,38 +511,10 @@ async function scanProject(
     technologyProfile,
     dependencyAnalysis,
     health,
+    ai,
 
-    validation: {
-      passed:
-        validationReport.passed,
-
-      total:
-        validationReport.results.length,
-
-      passedCount:
-        validationReport.results.filter(
-          result =>
-            result.status === "passed"
-        ).length,
-
-      failedCount:
-        validationReport.results.filter(
-          result =>
-            result.status === "failed"
-        ).length,
-
-      warningCount:
-        validationReport.results.filter(
-          result =>
-            result.status === "warning"
-        ).length,
-
-      skippedCount:
-        validationReport.results.filter(
-          result =>
-            result.status === "skipped"
-        ).length
-    },
+    validation:
+      validationSummary,
 
     startedAt,
     completedAt

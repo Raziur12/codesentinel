@@ -264,6 +264,47 @@ export interface ProjectHealthScore {
   factors: HealthFactor[];
 }
 
+export interface AiFindingInput {
+  id: string;
+  severity: FindingSeverity;
+  category: FindingCategory;
+  code?: string;
+  title: string;
+  message: string;
+  file?: string;
+  line?: number;
+  column?: number;
+  source: string;
+  suggestion?: string;
+  documentation?: string;
+  confidence: number;
+  evidence?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AiAnalysisInput {
+  schemaVersion: "1.0.0";
+  generatedAt: string;
+  purpose: "ai-analysis-input";
+  guardrails: {
+    deterministicValidationIsAuthoritative: true;
+    doNotReplaceValidation: true;
+    useStructuredFindingsBeforeTerminalOutput: true;
+    requireEvidenceLabels: Array<"confirmed" | "inferred" | "uncertain">;
+  };
+  project: {
+    path: string;
+    filesScanned: number;
+    structure: ProjectStructure;
+  };
+  health?: ProjectHealthScore;
+  technologyProfile: TechnologyProfile;
+  dependencyAnalysis?: DependencyAnalysis;
+  validation?: ValidationSummary;
+  findings: AiFindingInput[];
+  warnings: AiFindingInput[];
+}
+
 export interface HealthValidationResult {
   name: string;
   status: HealthFactorStatus;
@@ -408,10 +449,119 @@ export interface ScanResult {
 
   health?: ProjectHealthScore;
 
+  ai?: AiAnalysisInput;
+
   validation?: ValidationSummary;
 
   startedAt: string;
   completedAt: string;
+}
+
+function normalizeAiFinding(
+  finding: CommonFinding & {
+    evidence?: string;
+  }
+): AiFindingInput {
+  return {
+    id:
+      finding.id,
+    severity:
+      finding.severity,
+    category:
+      finding.category,
+    code:
+      finding.code,
+    title:
+      finding.title,
+    message:
+      finding.message,
+    file:
+      finding.file,
+    line:
+      finding.line,
+    column:
+      finding.column,
+    source:
+      finding.source,
+    suggestion:
+      finding.suggestion,
+    documentation:
+      finding.documentation,
+    confidence:
+      finding.confidence,
+    evidence:
+      finding.evidence,
+    metadata:
+      finding.metadata
+  };
+}
+
+export function createAiAnalysisInput(
+  input: {
+    projectPath: string;
+    filesScanned: number;
+    projectStructure: ProjectStructure;
+    technologyProfile: TechnologyProfile;
+    dependencyAnalysis?: DependencyAnalysis;
+    health?: ProjectHealthScore;
+    validation?: ValidationSummary;
+    findings: Array<CommonFinding & {
+      evidence?: string;
+    }>;
+    warnings: Array<CommonFinding & {
+      evidence?: string;
+    }>;
+    generatedAt?: string;
+  }
+): AiAnalysisInput {
+  return {
+    schemaVersion:
+      "1.0.0",
+    generatedAt:
+      input.generatedAt ?? new Date().toISOString(),
+    purpose:
+      "ai-analysis-input",
+    guardrails:
+      {
+        deterministicValidationIsAuthoritative:
+          true,
+        doNotReplaceValidation:
+          true,
+        useStructuredFindingsBeforeTerminalOutput:
+          true,
+        requireEvidenceLabels:
+          [
+            "confirmed",
+            "inferred",
+            "uncertain"
+          ]
+      },
+    project:
+      {
+        path:
+          input.projectPath,
+        filesScanned:
+          input.filesScanned,
+        structure:
+          input.projectStructure
+      },
+    health:
+      input.health,
+    technologyProfile:
+      input.technologyProfile,
+    dependencyAnalysis:
+      input.dependencyAnalysis,
+    validation:
+      input.validation,
+    findings:
+      input.findings.map(
+        normalizeAiFinding
+      ),
+    warnings:
+      input.warnings.map(
+        normalizeAiFinding
+      )
+  };
 }
 
 function clampScore(
