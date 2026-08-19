@@ -1,24 +1,23 @@
 import { spawn } from "node:child_process";
 import http from "node:http";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  getMongoDatabase,
+  MongoScanRepository,
+  readMongoDatabaseConfigFromEnv
+} from "@codesentinel/database";
+
+import type {
+  ScanRecord,
+  ScanRepository
+} from "@codesentinel/database";
+
 interface CreateScanRequest {
   projectPath?: string;
-}
-
-interface ScanRecord {
-  id: string;
-  status: "queued" | "running" | "passed" | "failed" | "error";
-  projectPath: string;
-  createdAt: string;
-  updatedAt: string;
-  exitCode?: number | null;
-  stdout?: string;
-  stderr?: string;
-  report?: unknown;
-  error?: string;
 }
 
 interface ApiResponse {
@@ -31,8 +30,7 @@ const apiSourceFile =
     import.meta.url
   );
 
-const repositoryRoot =
-  process.env.CODESENTINEL_ROOT ??
+const defaultRepositoryRoot =
   path.resolve(
     path.dirname(
       apiSourceFile
@@ -42,12 +40,102 @@ const repositoryRoot =
     ".."
   );
 
+function loadEnvFile(
+  filePath: string
+): void {
+  if (
+    !fsSync.existsSync(
+      filePath
+    )
+  ) {
+    return;
+  }
+
+  const content =
+    fsSync.readFileSync(
+      filePath,
+      "utf8"
+    );
+
+  for (
+    const line
+    of content.split(/\r?\n/)
+  ) {
+    const trimmedLine =
+      line.trim();
+
+    if (
+      trimmedLine.length === 0 ||
+      trimmedLine.startsWith("#")
+    ) {
+      continue;
+    }
+
+    const separatorIndex =
+      trimmedLine.indexOf("=");
+
+    if (
+      separatorIndex === -1
+    ) {
+      continue;
+    }
+
+    const key =
+      trimmedLine
+        .slice(
+          0,
+          separatorIndex
+        )
+        .trim();
+
+    const rawValue =
+      trimmedLine
+        .slice(
+          separatorIndex + 1
+        )
+        .trim();
+
+    const value =
+      rawValue.replace(
+        /^["']|["']$/g,
+        ""
+      );
+
+    if (
+      key &&
+      process.env[key] === undefined
+    ) {
+      process.env[key] =
+        value;
+    }
+  }
+}
+
+loadEnvFile(
+  path.join(
+    defaultRepositoryRoot,
+    ".env"
+  )
+);
+
+const repositoryRoot =
+  process.env.CODESENTINEL_ROOT
+    ? path.resolve(
+        defaultRepositoryRoot,
+        process.env.CODESENTINEL_ROOT
+      )
+    : defaultRepositoryRoot;
+
 const storageDirectory =
   path.join(
     repositoryRoot,
     ".codesentinel-api",
     "scans"
   );
+
+let scanRepository:
+  ScanRepository |
+  undefined;
 
 function createScanId(): string {
   return `scan_${Date.now().toString(36)}_${Math.random()
@@ -107,6 +195,56 @@ async function readScanRecord(
   } catch {
     return undefined;
   }
+}
+
+class FileScanRepository implements ScanRepository {
+  async save(
+    record: ScanRecord
+  ): Promise<void> {
+    await saveScanRecord(
+      record
+    );
+  }
+
+  async read(
+    scanId: string
+  ): Promise<ScanRecord | undefined> {
+    return readScanRecord(
+      scanId
+    );
+  }
+}
+
+async function getScanRepository(): Promise<ScanRepository> {
+  if (
+    scanRepository
+  ) {
+    return scanRepository;
+  }
+
+  const mongoConfig =
+    readMongoDatabaseConfigFromEnv();
+
+  if (
+    mongoConfig
+  ) {
+    const database =
+      await getMongoDatabase(
+        mongoConfig
+      );
+
+    scanRepository =
+      new MongoScanRepository(
+        database
+      );
+
+    return scanRepository;
+  }
+
+  scanRepository =
+    new FileScanRepository();
+
+  return scanRepository;
 }
 
 function sendJson(
@@ -223,6 +361,9 @@ function extractJsonReport(
 async function runScan(
   initialRecord: ScanRecord
 ): Promise<void> {
+  const repository =
+    await getScanRepository();
+
   const runningRecord: ScanRecord = {
     ...initialRecord,
     status:
@@ -231,7 +372,7 @@ async function runScan(
       new Date().toISOString()
   };
 
-  await saveScanRecord(
+  await repository.save(
     runningRecord
   );
 
@@ -283,7 +424,7 @@ async function runScan(
   child.on(
     "error",
     async error => {
-      await saveScanRecord({
+      await repository.save({
         ...runningRecord,
         status:
           "error",
@@ -305,7 +446,7 @@ async function runScan(
           stdout
         );
 
-      await saveScanRecord({
+      await repository.save({
         ...runningRecord,
         status:
           exitCode === 0
@@ -325,6 +466,9 @@ async function runScan(
 async function createScan(
   request: http.IncomingMessage
 ): Promise<ApiResponse> {
+  const repository =
+    await getScanRepository();
+
   const body =
     await readJsonRequest<CreateScanRequest>(
       request
@@ -345,7 +489,7 @@ async function createScan(
       new Date().toISOString()
   };
 
-  await saveScanRecord(
+  await repository.save(
     record
   );
 
@@ -371,8 +515,11 @@ async function createScan(
 async function getScan(
   scanId: string
 ): Promise<ApiResponse> {
+  const repository =
+    await getScanRepository();
+
   const record =
-    await readScanRecord(
+    await repository.read(
       scanId
     );
 
@@ -407,8 +554,11 @@ async function getScan(
 async function getScanFindings(
   scanId: string
 ): Promise<ApiResponse> {
+  const repository =
+    await getScanRepository();
+
   const record =
-    await readScanRecord(
+    await repository.read(
       scanId
     );
 
@@ -452,8 +602,11 @@ async function getScanFindings(
 async function getScanReport(
   scanId: string
 ): Promise<ApiResponse> {
+  const repository =
+    await getScanRepository();
+
   const record =
-    await readScanRecord(
+    await repository.read(
       scanId
     );
 

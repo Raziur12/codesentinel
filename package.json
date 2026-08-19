@@ -9,7 +9,7 @@
     "scanner:build": "npm --workspace packages/scanner-core run build && npm --workspace packages/project-analyzer run build && npm --workspace packages/technology-detectors run build && npm --workspace packages/validation-engine run build && npm --workspace apps/scanner run build",
     "scanner:start": "npm --workspace apps/scanner run start",
     "api": "npm --workspace apps/api run dev",
-    "api:build": "npm --workspace apps/api run build",
+    "api:build": "npm --workspace packages/database run build && npm --workspace apps/api run build",
     "api:start": "npm --workspace apps/api run start",
     "test": "npm run test --workspaces --if-present"
   },
