@@ -37,8 +37,10 @@ export interface FindingRecord {
   scanId: string;
   projectId?: string;
   teamId?: string;
+  type?: "finding" | "warning";
   severity: string;
   category: string;
+  code?: string;
   title: string;
   message: string;
   file?: string;

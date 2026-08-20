@@ -910,6 +910,79 @@ function createArtifactId(
   return `${scanId}_${type}_${index + 1}`;
 }
 
+function createFindingRecord(
+  record: ScanRecord,
+  value: unknown,
+  index: number,
+  type: "finding" | "warning"
+): FindingRecord {
+  const finding =
+    asRecord(
+      value
+    ) ?? {};
+
+  return {
+    id:
+      asString(
+        finding.id,
+        createArtifactId(
+          record.id,
+          type,
+          index
+        )
+      ),
+    scanId:
+      record.id,
+    projectId:
+      record.projectId,
+    teamId:
+      record.teamId,
+    type,
+    severity:
+      asString(
+        finding.severity,
+        type === "warning"
+          ? "medium"
+          : "info"
+      ),
+    category:
+      asString(
+        finding.category,
+        "general"
+      ),
+    code:
+      typeof finding.code === "string"
+        ? finding.code
+        : undefined,
+    title:
+      asString(
+        finding.title,
+        type === "warning"
+          ? "Warning"
+          : "Finding"
+      ),
+    message:
+      asString(
+        finding.message,
+        "No message provided"
+      ),
+    file:
+      typeof finding.file === "string"
+        ? finding.file
+        : undefined,
+    line:
+      asNumber(
+        finding.line
+      ),
+    column:
+      asNumber(
+        finding.column
+      ),
+    createdAt:
+      record.updatedAt
+  };
+}
+
 function createScanArtifacts(
   record: ScanRecord
 ): ScanArtifactSet {
@@ -918,74 +991,37 @@ function createScanArtifacts(
       record.report
     );
 
-  const createdAt =
-    record.updatedAt;
-
   const findings: FindingRecord[] =
-    asArray(
-      scan?.findings
-    ).map(
-      (
-        value,
-        index
-      ) => {
-        const finding =
-          asRecord(
-            value
-          ) ?? {};
-
-        return {
-          id:
-            asString(
-              finding.id,
-              createArtifactId(
-                record.id,
-                "finding",
-                index
-              )
-            ),
-          scanId:
-            record.id,
-          projectId:
-            record.projectId,
-          teamId:
-            record.teamId,
-          severity:
-            asString(
-              finding.severity,
-              "info"
-            ),
-          category:
-            asString(
-              finding.category,
-              "general"
-            ),
-          title:
-            asString(
-              finding.title,
-              "Finding"
-            ),
-          message:
-            asString(
-              finding.message,
-              "No message provided"
-            ),
-          file:
-            typeof finding.file === "string"
-              ? finding.file
-              : undefined,
-          line:
-            asNumber(
-              finding.line
-            ),
-          column:
-            asNumber(
-              finding.column
-            ),
-          createdAt
-        };
-      }
-    );
+    [
+      ...asArray(
+        scan?.findings
+      ).map(
+        (
+          value,
+          index
+        ) => createFindingRecord(
+          record,
+          value,
+          index,
+          "finding"
+        )
+      ),
+      ...asArray(
+        asRecord(
+          scan?.validation
+        )?.warnings
+      ).map(
+        (
+          value,
+          index
+        ) => createFindingRecord(
+          record,
+          value,
+          index,
+          "warning"
+        )
+      )
+    ];
 
   const aiRootCause =
     asRecord(
@@ -1018,7 +1054,8 @@ function createScanArtifacts(
         teamId:
           record.teamId,
         analysis,
-        createdAt
+        createdAt:
+          record.updatedAt
       })
     );
 
@@ -1043,7 +1080,8 @@ function createScanArtifacts(
         teamId:
           record.teamId,
         suggestion,
-        createdAt
+        createdAt:
+          record.updatedAt
       })
     );
 
@@ -1476,15 +1514,9 @@ async function getScanFindings(
   }
 
   const scan =
-    typeof record.report === "object" &&
-    record.report &&
-    "scan" in record.report
-      ? (record.report as {
-          scan?: {
-            findings?: unknown;
-          };
-        }).scan
-      : undefined;
+    getReportScan(
+      record.report
+    );
 
   return {
     status:
@@ -1493,7 +1525,24 @@ async function getScanFindings(
       {
         scanId,
         findings:
-          scan?.findings ?? []
+          [
+            ...asArray(
+              scan?.findings
+            ),
+            ...asArray(
+              asRecord(
+                scan?.validation
+              )?.warnings
+            ).map(
+              warning => ({
+                ...asRecord(
+                  warning
+                ),
+                type:
+                  "warning"
+              })
+            )
+          ]
       }
   };
 }
