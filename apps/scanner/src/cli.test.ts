@@ -230,6 +230,100 @@ test(
 );
 
 test(
+  "scanner CLI scans a selected workspace inside a monorepo",
+  async () => {
+    const projectPath =
+      await createFixture({
+        "package.json":
+          JSON.stringify(
+            {
+              name:
+                "workspace-root",
+              version:
+                "1.0.0",
+              private:
+                true,
+              workspaces:
+                [
+                  "packages/*"
+                ],
+              scripts:
+                {
+                  build:
+                    "node root-build.js"
+                }
+            },
+            null,
+            2
+          ),
+        "root-build.js":
+          "throw new Error('root build should not run during workspace scan');\n",
+        "packages/api/package.json":
+          JSON.stringify(
+            {
+              name:
+                "@fixture/api",
+              version:
+                "1.0.0",
+              scripts:
+                {
+                  build:
+                    "node --check index.js",
+                  test:
+                    "node --test",
+                  lint:
+                    "node --check index.js"
+                }
+            },
+            null,
+            2
+          ),
+        "packages/api/index.js":
+          "console.log('workspace api');\n"
+      });
+
+    const result =
+      await runScanner([
+        projectPath,
+        "--workspace",
+        "packages/api",
+        "--format",
+        "json"
+      ]);
+
+    assert.equal(
+      result.exitCode,
+      0,
+      result.stderr
+    );
+
+    const output =
+      JSON.parse(
+        result.stdout
+      );
+
+    assert.equal(
+      output.scan.project.path,
+      path.join(
+        projectPath,
+        "packages",
+        "api"
+      )
+    );
+
+    assert.equal(
+      output.scan.validation.packageManager,
+      "npm"
+    );
+
+    assert.equal(
+      output.scan.summary.passed,
+      true
+    );
+  }
+);
+
+test(
   "scanner CLI returns validation failure exit code for a failing project",
   async () => {
     const projectPath =
