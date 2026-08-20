@@ -133,6 +133,25 @@ function getFindings(scan) {
   return getScanReport(scan)?.findings ?? [];
 }
 
+function getWarnings(scan) {
+  return getScanReport(scan)?.validation?.warnings ?? [];
+}
+
+function getIssues(scan) {
+  return [
+    ...getFindings(scan).map(item => ({
+      ...item,
+      type:
+        "finding"
+    })),
+    ...getWarnings(scan).map(item => ({
+      ...item,
+      type:
+        "warning"
+    }))
+  ];
+}
+
 function getHealth(scan) {
   return getScanReport(scan)?.health;
 }
@@ -191,11 +210,11 @@ function renderScans() {
 function renderMetrics(scan) {
   const health = getHealth(scan);
   const validation = getValidation(scan);
-  const findings = getFindings(scan);
+  const issues = getIssues(scan);
 
   elements.healthScore.textContent = health ? `${health.score}/${health.maxScore}` : "--";
   elements.validationStatus.textContent = validation ? (validation.passed ? "passed" : "failed") : scan?.status ?? "--";
-  elements.findingCount.textContent = String(findings.length);
+  elements.findingCount.textContent = String(issues.length);
   elements.projectLabel.textContent = compactPath(scan?.projectPath);
 }
 
@@ -259,8 +278,8 @@ function renderSeverity(scan) {
     info: 0
   };
 
-  for (const finding of getFindings(scan)) {
-    const severity = severityClass(finding.severity);
+  for (const issue of getIssues(scan)) {
+    const severity = severityClass(issue.severity);
     if (severity in counts) counts[severity] += 1;
   }
 
@@ -280,23 +299,23 @@ function renderSeverity(scan) {
 }
 
 function renderFindings(scan) {
-  const findings = getFindings(scan);
-  elements.findingsLabel.textContent = `${findings.length} total`;
+  const issues = getIssues(scan);
+  elements.findingsLabel.textContent = `${issues.length} total`;
   elements.findingsList.innerHTML = "";
 
-  if (findings.length === 0) {
+  if (issues.length === 0) {
     elements.findingsList.innerHTML = `<div class="empty">No findings active</div>`;
     return;
   }
 
-  for (const finding of findings) {
+  for (const issue of issues) {
     const item = document.createElement("div");
     item.className = "finding-row";
     item.innerHTML = `
-      <strong>${html(finding.title)}</strong>
-      <span class="severity-${severityClass(finding.severity)}">${html(finding.severity)} - ${html(finding.category)} - ${html(finding.code ?? "no code")}</span>
-      <p>${html(finding.message)}</p>
-      <span>${html(finding.file ? `${finding.file}:${finding.line ?? ""}:${finding.column ?? ""}` : "No file location")}</span>
+      <strong>${html(issue.title)}</strong>
+      <span class="severity-${severityClass(issue.severity)}">${html(issue.type)} - ${html(issue.severity)} - ${html(issue.category)} - ${html(issue.code ?? "no code")}</span>
+      <p>${html(issue.message)}</p>
+      <span>${html(issue.file ? `${issue.file}:${issue.line ?? ""}:${issue.column ?? ""}` : "No file location")}</span>
     `;
     elements.findingsList.append(item);
   }
@@ -306,12 +325,15 @@ function renderAi(scan) {
   const report = getScanReport(scan);
   const analyses = report?.aiRootCause?.analyses ?? [];
   const fixes = report?.aiFixSuggestions?.suggestions ?? [];
+  const warningCount = getWarnings(scan).length;
   elements.aiLabel.textContent = `${analyses.length} explanation(s)`;
   elements.aiList.innerHTML = "";
   elements.fixList.innerHTML = "";
 
   if (analyses.length === 0) {
-    elements.aiList.innerHTML = `<div class="empty">No AI active</div>`;
+    elements.aiList.innerHTML = warningCount > 0
+      ? `<div class="empty">No AI active for ${warningCount} warning(s)</div>`
+      : `<div class="empty">No AI active</div>`;
   }
 
   for (const analysis of analyses) {
@@ -358,13 +380,13 @@ function renderTrends() {
 
   for (const scan of scans) {
     const health = getHealthPercent(scan);
-    const findings = getFindings(scan).length;
+    const issues = getIssues(scan).length;
     const row = document.createElement("div");
     row.className = "trend-row";
     row.innerHTML = `
       <strong>${html(new Date(scan.createdAt).toLocaleDateString())}</strong>
       <div class="bar-track"><div class="bar-fill" style="width:${health ?? 0}%"></div></div>
-      <span>${html(health === undefined ? scan.status : `Health ${health}%`)}<br>${html(findings)} finding(s)</span>
+      <span>${html(health === undefined ? scan.status : `Health ${health}%`)}<br>${html(issues)} issue(s)</span>
     `;
     elements.trendList.append(row);
   }
