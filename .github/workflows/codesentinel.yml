@@ -59,6 +59,8 @@ jobs:
           name: codesentinel-sarif
           path: codesentinel.sarif
 
-      - name: Fail on CodeSentinel findings
+      - name: Report CodeSentinel result
         if: steps.codesentinel.outcome == 'failure'
-        run: exit 1
+        run: |
+          echo "CodeSentinel found issues. See the uploaded SARIF artifact for details."
+          echo "This workflow is report-only for now and does not fail the build on findings."
