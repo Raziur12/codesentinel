@@ -285,7 +285,7 @@ function renderFindings(scan) {
   elements.findingsList.innerHTML = "";
 
   if (findings.length === 0) {
-    elements.findingsList.innerHTML = `<div class="empty">No active findings</div>`;
+    elements.findingsList.innerHTML = `<div class="empty">No findings active</div>`;
     return;
   }
 
@@ -311,7 +311,7 @@ function renderAi(scan) {
   elements.fixList.innerHTML = "";
 
   if (analyses.length === 0) {
-    elements.aiList.innerHTML = `<div class="empty">No AI explanations</div>`;
+    elements.aiList.innerHTML = `<div class="empty">No AI active</div>`;
   }
 
   for (const analysis of analyses) {
@@ -327,7 +327,7 @@ function renderAi(scan) {
   }
 
   if (fixes.length === 0) {
-    elements.fixList.innerHTML = `<div class="empty">No fix suggestions</div>`;
+    elements.fixList.innerHTML = `<div class="empty">No fix suggestions active</div>`;
   }
 
   for (const fix of fixes) {
@@ -364,7 +364,7 @@ function renderTrends() {
     row.innerHTML = `
       <strong>${html(new Date(scan.createdAt).toLocaleDateString())}</strong>
       <div class="bar-track"><div class="bar-fill" style="width:${health ?? 0}%"></div></div>
-      <span>${html(health === undefined ? scan.status : `${health}%`)} / ${html(findings)} finding(s)</span>
+      <span>${html(health === undefined ? scan.status : `Health ${health}%`)}<br>${html(findings)} finding(s)</span>
     `;
     elements.trendList.append(row);
   }
