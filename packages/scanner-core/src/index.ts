@@ -530,6 +530,29 @@ export interface ScannerFinding extends CommonFinding {
   evidence?: string;
 }
 
+export interface SecurityReport {
+  schemaVersion: "1.0.0";
+  generatedAt: string;
+  status: "passed" | "failed";
+  summary: {
+    totalFindings: number;
+    securityFindings: number;
+    secretFindings: number;
+    dependencyRiskSignals: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    info: number;
+  };
+  checks: {
+    audit: HealthFactorStatus;
+    secrets: HealthFactorStatus;
+  };
+  findings: CommonFinding[];
+  recommendations: string[];
+}
+
 function hashFindingKey(
   key: string
 ): string {
@@ -580,6 +603,145 @@ export function createFindingId(
   return `cs_${hashFindingKey(key)}`;
 }
 
+function countSeverity(
+  findings: CommonFinding[],
+  severity: FindingSeverity
+): number {
+  return findings.filter(
+    finding => finding.severity === severity
+  ).length;
+}
+
+function getValidationStatus(
+  validation: {
+    results: Array<{
+      category: FindingCategory;
+      status: HealthFactorStatus;
+    }>;
+  },
+  category: FindingCategory
+): HealthFactorStatus {
+  return validation.results.find(
+    result => result.category === category
+  )?.status ?? "skipped";
+}
+
+export function createSecurityReport(
+  input: {
+    generatedAt: string;
+    validation: {
+      results: Array<{
+        category: FindingCategory;
+        status: HealthFactorStatus;
+      }>;
+      findings: CommonFinding[];
+      warnings: CommonFinding[];
+    };
+    dependencyAnalysis?: DependencyAnalysis;
+  }
+): SecurityReport {
+  const securityFindings =
+    [
+      ...input.validation.findings,
+      ...input.validation.warnings
+    ].filter(
+      finding =>
+        finding.category === "security" ||
+        finding.category === "secret"
+    );
+
+  const dependencyRiskSignals =
+    [
+      ...(input.dependencyAnalysis?.outdatedDependencies ?? []),
+      ...(input.dependencyAnalysis?.engineRequirements ?? []),
+      ...(input.dependencyAnalysis?.dependencyConflicts ?? []),
+      ...(input.dependencyAnalysis?.peerDependencyConflicts ?? [])
+    ];
+
+  const recommendations =
+    securityFindings.length === 0
+      ? [
+          "No active security or secret findings were detected.",
+          "Keep dependency, audit, and secret checks enabled in CI."
+        ]
+      : [
+          "Fix critical and high security findings before release.",
+          "Rotate any exposed secrets and move credentials to a secret manager.",
+          "Re-run CodeSentinel after remediation to confirm the security status."
+        ];
+
+  return {
+    schemaVersion:
+      "1.0.0",
+    generatedAt:
+      input.generatedAt,
+    status:
+      securityFindings.some(
+        finding =>
+          finding.severity === "critical" ||
+          finding.severity === "high"
+      )
+        ? "failed"
+        : "passed",
+    summary:
+      {
+        totalFindings:
+          securityFindings.length,
+        securityFindings:
+          securityFindings.filter(
+            finding => finding.category === "security"
+          ).length,
+        secretFindings:
+          securityFindings.filter(
+            finding => finding.category === "secret"
+          ).length,
+        dependencyRiskSignals:
+          dependencyRiskSignals.length,
+        critical:
+          countSeverity(
+            securityFindings,
+            "critical"
+          ),
+        high:
+          countSeverity(
+            securityFindings,
+            "high"
+          ),
+        medium:
+          countSeverity(
+            securityFindings,
+            "medium"
+          ),
+        low:
+          countSeverity(
+            securityFindings,
+            "low"
+          ),
+        info:
+          countSeverity(
+            securityFindings,
+            "info"
+          )
+      },
+    checks:
+      {
+        audit:
+          getValidationStatus(
+            input.validation,
+            "security"
+          ),
+        secrets:
+          getValidationStatus(
+            input.validation,
+            "secret"
+          )
+      },
+    findings:
+      securityFindings,
+    recommendations
+  };
+}
+
 export interface ScanResult {
   projectPath: string;
   filesScanned: number;
@@ -593,6 +755,8 @@ export interface ScanResult {
   dependencyAnalysis?: DependencyAnalysis;
 
   health?: ProjectHealthScore;
+
+  securityReport?: SecurityReport;
 
   ai?: AiAnalysisInput;
 

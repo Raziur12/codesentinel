@@ -7,17 +7,26 @@ import { fileURLToPath } from "node:url";
 
 import {
   getMongoDatabase,
+  MongoProjectRepository,
   MongoScanRepository,
   readMongoDatabaseConfigFromEnv
 } from "@codesentinel/database";
 
 import type {
+  ProjectRecord,
+  ProjectRepository,
   ScanRecord,
   ScanRepository
 } from "@codesentinel/database";
 
 interface CreateScanRequest {
+  projectId?: string;
   projectPath?: string;
+}
+
+interface CreateProjectRequest {
+  name?: string;
+  path?: string;
 }
 
 interface ApiResponse {
@@ -133,14 +142,62 @@ const storageDirectory =
     "scans"
   );
 
+const projectStorageDirectory =
+  path.join(
+    repositoryRoot,
+    ".codesentinel-api",
+    "projects"
+  );
+
 let scanRepository:
   ScanRepository |
+  undefined;
+
+let projectRepository:
+  ProjectRepository |
   undefined;
 
 function createScanId(): string {
   return `scan_${Date.now().toString(36)}_${Math.random()
     .toString(36)
     .slice(2, 10)}`;
+}
+
+function normalizeIdentifierValue(
+  value: string
+): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(
+      0,
+      48
+    );
+}
+
+function createProjectId(
+  projectPath: string,
+  teamId: string | undefined
+): string {
+  const base =
+    normalizeIdentifierValue(
+      path.basename(
+        projectPath
+      ) || "project"
+    ) || "project";
+
+  const hash =
+    Buffer.from(
+      `${teamId ?? "default"}:${projectPath}`
+    )
+      .toString("base64url")
+      .slice(
+        0,
+        12
+      );
+
+  return `project_${base}_${hash}`;
 }
 
 function getScanRecordPath(
@@ -155,6 +212,16 @@ function getScanRecordPath(
 async function ensureStorage(): Promise<void> {
   await fs.mkdir(
     storageDirectory,
+    {
+      recursive:
+        true
+    }
+  );
+}
+
+async function ensureProjectStorage(): Promise<void> {
+  await fs.mkdir(
+    projectStorageDirectory,
     {
       recursive:
         true
@@ -263,6 +330,109 @@ async function listScanRecords(
   }
 }
 
+function getProjectRecordPath(
+  projectId: string
+): string {
+  return path.join(
+    projectStorageDirectory,
+    `${projectId}.json`
+  );
+}
+
+async function saveProjectRecord(
+  record: ProjectRecord
+): Promise<void> {
+  await ensureProjectStorage();
+
+  await fs.writeFile(
+    getProjectRecordPath(
+      record.id
+    ),
+    JSON.stringify(
+      record,
+      null,
+      2
+    ),
+    "utf8"
+  );
+}
+
+async function readProjectRecord(
+  projectId: string
+): Promise<ProjectRecord | undefined> {
+  try {
+    return JSON.parse(
+      await fs.readFile(
+        getProjectRecordPath(
+          projectId
+        ),
+        "utf8"
+      )
+    ) as ProjectRecord;
+  } catch {
+    return undefined;
+  }
+}
+
+async function listProjectRecords(
+  limit = 50
+): Promise<ProjectRecord[]> {
+  try {
+    const entries =
+      await fs.readdir(
+        projectStorageDirectory
+      );
+
+    const records =
+      await Promise.all(
+        entries
+          .filter(
+            entry => entry.endsWith(
+              ".json"
+            )
+          )
+          .map(
+            async entry => {
+              try {
+                return JSON.parse(
+                  await fs.readFile(
+                    path.join(
+                      projectStorageDirectory,
+                      entry
+                    ),
+                    "utf8"
+                  )
+                ) as ProjectRecord;
+              } catch {
+                return undefined;
+              }
+            }
+          )
+      );
+
+    return records
+      .filter(
+        (record): record is ProjectRecord => Boolean(
+          record
+        )
+      )
+      .sort(
+        (
+          left,
+          right
+        ) => right.updatedAt.localeCompare(
+          left.updatedAt
+        )
+      )
+      .slice(
+        0,
+        limit
+      );
+  } catch {
+    return [];
+  }
+}
+
 class FileScanRepository implements ScanRepository {
   async save(
     record: ScanRecord
@@ -284,6 +454,51 @@ class FileScanRepository implements ScanRepository {
     limit?: number
   ): Promise<ScanRecord[]> {
     return listScanRecords(
+      limit
+    );
+  }
+
+  async listByProject(
+    projectId: string,
+    limit = 50
+  ): Promise<ScanRecord[]> {
+    const records =
+      await listScanRecords(
+        500
+      );
+
+    return records
+      .filter(
+        record => record.projectId === projectId
+      )
+      .slice(
+        0,
+        limit
+      );
+  }
+}
+
+class FileProjectRepository implements ProjectRepository {
+  async save(
+    record: ProjectRecord
+  ): Promise<void> {
+    await saveProjectRecord(
+      record
+    );
+  }
+
+  async read(
+    projectId: string
+  ): Promise<ProjectRecord | undefined> {
+    return readProjectRecord(
+      projectId
+    );
+  }
+
+  async list(
+    limit?: number
+  ): Promise<ProjectRecord[]> {
+    return listProjectRecords(
       limit
     );
   }
@@ -321,6 +536,38 @@ async function getScanRepository(): Promise<ScanRepository> {
   return scanRepository;
 }
 
+async function getProjectRepository(): Promise<ProjectRepository> {
+  if (
+    projectRepository
+  ) {
+    return projectRepository;
+  }
+
+  const mongoConfig =
+    readMongoDatabaseConfigFromEnv();
+
+  if (
+    mongoConfig
+  ) {
+    const database =
+      await getMongoDatabase(
+        mongoConfig
+      );
+
+    projectRepository =
+      new MongoProjectRepository(
+        database
+      );
+
+    return projectRepository;
+  }
+
+  projectRepository =
+    new FileProjectRepository();
+
+  return projectRepository;
+}
+
 function sendJson(
   response: http.ServerResponse,
   status: number,
@@ -336,7 +583,7 @@ function sendJson(
       "access-control-allow-methods":
         "GET,POST,OPTIONS",
       "access-control-allow-headers":
-        "content-type"
+        "authorization,content-type,x-codesentinel-team"
     }
   );
 
@@ -407,6 +654,145 @@ function resolveProjectPath(
     repositoryRoot,
     projectPath
   );
+}
+
+function getTeamId(
+  request: http.IncomingMessage
+): string | undefined {
+  const headerValue =
+    request.headers["x-codesentinel-team"];
+
+  const teamId =
+    Array.isArray(
+      headerValue
+    )
+      ? headerValue[0]
+      : headerValue;
+
+  return teamId ?? process.env.CODESENTINEL_DEFAULT_TEAM_ID;
+}
+
+function getExpectedApiToken(): string | undefined {
+  const token =
+    process.env.CODESENTINEL_API_TOKEN?.trim();
+
+  return token
+    ? token
+    : undefined;
+}
+
+function getRequestBearerToken(
+  request: http.IncomingMessage
+): string | undefined {
+  const authorization =
+    request.headers.authorization;
+
+  if (
+    !authorization
+  ) {
+    return undefined;
+  }
+
+  const [
+    scheme,
+    token
+  ] = authorization.split(/\s+/, 2);
+
+  return scheme.toLowerCase() === "bearer"
+    ? token
+    : undefined;
+}
+
+function isAuthorized(
+  request: http.IncomingMessage
+): boolean {
+  const expectedToken =
+    getExpectedApiToken();
+
+  if (
+    !expectedToken
+  ) {
+    return true;
+  }
+
+  return getRequestBearerToken(
+    request
+  ) === expectedToken;
+}
+
+function extractHealthPercent(
+  report: unknown
+): number | undefined {
+  const scan =
+    typeof report === "object" &&
+    report &&
+    "scan" in report
+      ? (report as {
+          scan?: {
+            health?: {
+              score?: number;
+              maxScore?: number;
+            };
+          };
+        }).scan
+      : undefined;
+
+  if (
+    !scan?.health?.maxScore
+  ) {
+    return undefined;
+  }
+
+  return Math.round(
+    (
+      scan.health.score ?? 0
+    ) / scan.health.maxScore * 100
+  );
+}
+
+async function upsertProjectFromPath(
+  projectPath: string,
+  teamId: string | undefined,
+  name: string | undefined
+): Promise<ProjectRecord> {
+  const repository =
+    await getProjectRepository();
+
+  const id =
+    createProjectId(
+      projectPath,
+      teamId
+    );
+
+  const existing =
+    await repository.read(
+      id
+    );
+
+  const now =
+    new Date().toISOString();
+
+  const record: ProjectRecord = {
+    ...existing,
+    id,
+    path:
+      projectPath,
+    teamId,
+    name:
+      name ?? existing?.name ?? path.basename(
+        projectPath
+      ),
+    createdAt:
+      existing?.createdAt ?? now,
+    updatedAt:
+      now
+  };
+
+  await repository.save(
+    record
+  );
+
+  return record;
 }
 
 function getScannerScriptPath(): string {
@@ -528,7 +914,7 @@ async function runScan(
           stdout
         );
 
-      await repository.save({
+      const completedRecord: ScanRecord = {
         ...runningRecord,
         status:
           exitCode === 0
@@ -540,7 +926,41 @@ async function runScan(
         stdout,
         stderr,
         report
-      });
+      };
+
+      await repository.save(
+        completedRecord
+      );
+
+      if (
+        completedRecord.projectId
+      ) {
+        const projects =
+          await getProjectRepository();
+
+        const project =
+          await projects.read(
+            completedRecord.projectId
+          );
+
+        if (
+          project
+        ) {
+          await projects.save({
+            ...project,
+            lastScanId:
+              completedRecord.id,
+            lastStatus:
+              completedRecord.status,
+            lastHealthScore:
+              extractHealthPercent(
+                report
+              ),
+            updatedAt:
+              completedRecord.updatedAt
+          });
+        }
+      }
     }
   );
 }
@@ -548,12 +968,62 @@ async function runScan(
 async function createScan(
   request: http.IncomingMessage
 ): Promise<ApiResponse> {
-  const repository =
-    await getScanRepository();
-
   const body =
     await readJsonRequest<CreateScanRequest>(
       request
+    );
+
+  return createScanFromBody(
+    request,
+    body
+  );
+}
+
+async function createScanFromBody(
+  request: http.IncomingMessage,
+  body: CreateScanRequest
+): Promise<ApiResponse> {
+  const repository =
+    await getScanRepository();
+
+  const requestedProjectPath =
+    body.projectId
+      ? (
+          await (
+            await getProjectRepository()
+          ).read(
+            body.projectId
+          )
+        )?.path
+      : body.projectPath;
+
+  if (
+    body.projectId &&
+    !requestedProjectPath
+  ) {
+    return {
+      status:
+        404,
+      body:
+        {
+          error:
+            "Project not found"
+        }
+    };
+  }
+
+  const projectPath =
+    resolveProjectPath(
+      requestedProjectPath
+    );
+
+  const project =
+    await upsertProjectFromPath(
+      projectPath,
+      getTeamId(
+        request
+      ),
+      undefined
     );
 
   const record: ScanRecord = {
@@ -561,10 +1031,12 @@ async function createScan(
       createScanId(),
     status:
       "queued",
+    projectId:
+      project.id,
+    teamId:
+      project.teamId,
     projectPath:
-      resolveProjectPath(
-        body.projectPath
-      ),
+      project.path,
     createdAt:
       new Date().toISOString(),
     updatedAt:
@@ -586,6 +1058,8 @@ async function createScan(
       {
         id:
           record.id,
+        projectId:
+          record.projectId,
         status:
           record.status,
         projectPath:
@@ -750,6 +1224,131 @@ async function getScanReport(
   };
 }
 
+async function listProjects(): Promise<ApiResponse> {
+  const repository =
+    await getProjectRepository();
+
+  const projects =
+    await repository.list(
+      50
+    );
+
+  return {
+    status:
+      200,
+    body:
+      {
+        projects
+      }
+  };
+}
+
+async function createProject(
+  request: http.IncomingMessage
+): Promise<ApiResponse> {
+  const body =
+    await readJsonRequest<CreateProjectRequest>(
+      request
+    );
+
+  const project =
+    await upsertProjectFromPath(
+      resolveProjectPath(
+        body.path
+      ),
+      getTeamId(
+        request
+      ),
+      body.name
+    );
+
+  return {
+    status:
+      201,
+    body:
+      project
+  };
+}
+
+async function getProject(
+  projectId: string
+): Promise<ApiResponse> {
+  const repository =
+    await getProjectRepository();
+
+  const project =
+    await repository.read(
+      projectId
+    );
+
+  if (
+    !project
+  ) {
+    return {
+      status:
+        404,
+      body:
+        {
+          error:
+            "Project not found"
+        }
+    };
+  }
+
+  return {
+    status:
+      200,
+    body:
+      project
+  };
+}
+
+async function listProjectScans(
+  projectId: string
+): Promise<ApiResponse> {
+  const project =
+    await (
+      await getProjectRepository()
+    ).read(
+      projectId
+    );
+
+  if (
+    !project
+  ) {
+    return {
+      status:
+        404,
+      body:
+        {
+          error:
+            "Project not found"
+        }
+    };
+  }
+
+  const scans =
+    await (
+      await getScanRepository()
+    ).listByProject(
+      projectId,
+      50
+    );
+
+  return {
+    status:
+      200,
+    body:
+      {
+        project,
+        scans:
+          scans.map(
+            summarizeScanRecord
+          )
+      }
+  };
+}
+
 function getRouteParts(
   requestUrl: string | undefined
 ): string[] {
@@ -780,6 +1379,22 @@ export async function handleApiRequest(
     };
   }
 
+  if (
+    !isAuthorized(
+      request
+    )
+  ) {
+    return {
+      status:
+        401,
+      body:
+        {
+          error:
+            "Unauthorized"
+        }
+    };
+  }
+
   const parts =
     getRouteParts(
       request.url
@@ -800,6 +1415,10 @@ export async function handleApiRequest(
             "ok",
           endpoints:
             [
+              "GET /projects",
+              "POST /projects",
+              "GET /projects/:id",
+              "GET /projects/:id/scans",
               "POST /scans",
               "GET /scans",
               "GET /scans/:id",
@@ -808,6 +1427,67 @@ export async function handleApiRequest(
             ]
         }
     };
+  }
+
+  if (
+    request.method === "GET" &&
+    parts[0] === "projects" &&
+    parts.length === 1
+  ) {
+    return listProjects();
+  }
+
+  if (
+    request.method === "POST" &&
+    parts[0] === "projects" &&
+    parts.length === 1
+  ) {
+    return createProject(
+      request
+    );
+  }
+
+  if (
+    request.method === "GET" &&
+    parts[0] === "projects" &&
+    parts[1] &&
+    parts.length === 2
+  ) {
+    return getProject(
+      parts[1]
+    );
+  }
+
+  if (
+    request.method === "GET" &&
+    parts[0] === "projects" &&
+    parts[1] &&
+    parts[2] === "scans"
+  ) {
+    return listProjectScans(
+      parts[1]
+    );
+  }
+
+  if (
+    request.method === "POST" &&
+    parts[0] === "projects" &&
+    parts[1] &&
+    parts[2] === "scans"
+  ) {
+    const body =
+      await readJsonRequest<Omit<CreateScanRequest, "projectId">>(
+        request
+      );
+
+    return createScanFromBody(
+      request,
+      {
+        ...body,
+        projectId:
+          parts[1]
+      }
+    );
   }
 
   if (

@@ -7,7 +7,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test dist/health-score.test.js dist/ai-analysis-input.test.js dist/ai-root-cause-analysis.test.js dist/ai-fix-suggestions.test.js dist/ai-provider.test.js"
+    "test": "npm run build && node --test dist/health-score.test.js dist/security-report.test.js dist/ai-analysis-input.test.js dist/ai-root-cause-analysis.test.js dist/ai-fix-suggestions.test.js dist/ai-provider.test.js"
   },
   "devDependencies": {
     "typescript": "^5.9.2"

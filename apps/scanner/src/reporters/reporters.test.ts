@@ -123,6 +123,49 @@ const execution: ScanExecution = {
         },
       ai:
         undefined,
+      securityReport:
+        {
+          schemaVersion:
+            "1.0.0",
+          generatedAt:
+            "2026-08-20T00:00:01.000Z",
+          status:
+            "passed",
+          summary:
+            {
+              totalFindings:
+                0,
+              securityFindings:
+                0,
+              secretFindings:
+                0,
+              dependencyRiskSignals:
+                0,
+              critical:
+                0,
+              high:
+                0,
+              medium:
+                0,
+              low:
+                0,
+              info:
+                0
+            },
+          checks:
+            {
+              audit:
+                "passed",
+              secrets:
+                "passed"
+            },
+          findings:
+            [],
+          recommendations:
+            [
+              "No active security or secret findings were detected."
+            ]
+        },
       aiRootCause:
         undefined,
       aiFixSuggestions:
@@ -236,6 +279,11 @@ test(
       true
     );
 
+    assert.equal(
+      output.scan.securityReport.status,
+      "passed"
+    );
+
     assert.deepEqual(
       output.scan.findings,
       []
@@ -305,6 +353,11 @@ test(
 
     assert.match(
       output,
+      /Security Report: passed/
+    );
+
+    assert.match(
+      output,
       /Skipped: 1/
     );
 
@@ -336,6 +389,11 @@ test(
     assert.match(
       output,
       /Skipped: 1/
+    );
+
+    assert.match(
+      output,
+      /## Security/
     );
   }
 );

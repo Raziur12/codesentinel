@@ -8,6 +8,8 @@ export type ScanStatus =
 export interface ScanRecord {
   id: string;
   status: ScanStatus;
+  projectId?: string;
+  teamId?: string;
   projectPath: string;
   createdAt: string;
   updatedAt: string;
@@ -21,7 +23,11 @@ export interface ScanRecord {
 export interface ProjectRecord {
   id: string;
   path: string;
+  teamId?: string;
   name?: string;
+  lastScanId?: string;
+  lastStatus?: ScanStatus;
+  lastHealthScore?: number;
   createdAt: string;
   updatedAt: string;
 }

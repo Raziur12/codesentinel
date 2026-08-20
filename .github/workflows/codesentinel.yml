@@ -13,6 +13,10 @@ on:
         required: false
         default: .
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   scan:
     name: CodeSentinel scan
@@ -35,6 +39,25 @@ jobs:
         run: npm run scanner:build
 
       - name: Run CodeSentinel
+        id: codesentinel
+        continue-on-error: true
         env:
           PROJECT_PATH: ${{ github.event.inputs.project_path || '.' }}
-        run: node apps/scanner/dist/index.js "$PROJECT_PATH" --format text
+        run: node apps/scanner/dist/index.js "$PROJECT_PATH" --format sarif > codesentinel.sarif
+
+      - name: Upload SARIF
+        if: always() && hashFiles('codesentinel.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: codesentinel.sarif
+
+      - name: Upload scan artifact
+        if: always() && hashFiles('codesentinel.sarif') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: codesentinel-sarif
+          path: codesentinel.sarif
+
+      - name: Fail on CodeSentinel findings
+        if: steps.codesentinel.outcome == 'failure'
+        run: exit 1

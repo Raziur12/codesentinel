@@ -204,6 +204,28 @@ test(
       output.scan.validation.passed,
       true
     );
+
+    assert.equal(
+      output.scan.securityReport.status,
+      "passed"
+    );
+
+    const securityReport =
+      JSON.parse(
+        await fs.readFile(
+          path.join(
+            projectPath,
+            ".codesentinel",
+            "security-report.json"
+          ),
+          "utf8"
+        )
+      );
+
+    assert.equal(
+      securityReport.schemaVersion,
+      "1.0.0"
+    );
   }
 );
 

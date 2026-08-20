@@ -7,12 +7,14 @@ function normalizeApiUrl(value) {
 
 const state = {
   apiUrl: normalizeApiUrl(localStorage.getItem("codesentinel.apiUrl")),
+  apiToken: localStorage.getItem("codesentinel.apiToken") ?? "",
   scans: JSON.parse(localStorage.getItem("codesentinel.scans") ?? "[]"),
   selectedScanId: localStorage.getItem("codesentinel.selectedScanId")
 };
 
 const elements = {
   apiUrl: document.querySelector("#api-url"),
+  apiToken: document.querySelector("#api-token"),
   projectPath: document.querySelector("#project-path"),
   form: document.querySelector("#scan-form"),
   connectionStatus: document.querySelector("#connection-status"),
@@ -38,11 +40,13 @@ const elements = {
 };
 
 elements.apiUrl.value = state.apiUrl;
+elements.apiToken.value = state.apiToken;
 
 function saveState() {
   state.apiUrl = normalizeApiUrl(state.apiUrl);
   elements.apiUrl.value = state.apiUrl;
   localStorage.setItem("codesentinel.apiUrl", state.apiUrl);
+  localStorage.setItem("codesentinel.apiToken", state.apiToken);
   localStorage.setItem("codesentinel.scans", JSON.stringify(state.scans));
 
   if (state.selectedScanId) {
@@ -65,9 +69,19 @@ function html(value) {
 
 async function fetchJson(path, options) {
   let response;
+  const headers = {
+    ...(options?.headers ?? {})
+  };
+
+  if (state.apiToken.trim()) {
+    headers.authorization = `Bearer ${state.apiToken.trim()}`;
+  }
 
   try {
-    response = await fetch(endpoint(path), options);
+    response = await fetch(endpoint(path), {
+      ...options,
+      headers
+    });
   } catch {
     throw new Error("API offline. Start backend with npm run api.");
   }
@@ -447,12 +461,14 @@ async function createScan(projectPath) {
 elements.form.addEventListener("submit", event => {
   event.preventDefault();
   state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
+  state.apiToken = elements.apiToken.value.trim();
   saveState();
   void createScan(elements.projectPath.value.trim() || ".");
 });
 
 elements.refreshScan.addEventListener("click", () => {
   state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
+  state.apiToken = elements.apiToken.value.trim();
   saveState();
   void loadScans().catch(error => setConnection(error.message, false));
 });

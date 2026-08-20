@@ -154,7 +154,7 @@ h3 {
 
 .scan-form {
   display: grid;
-  grid-template-columns: minmax(210px, 280px) minmax(160px, 240px) 110px;
+  grid-template-columns: minmax(210px, 280px) minmax(150px, 210px) minmax(160px, 240px) 110px;
   gap: 10px;
 }
 

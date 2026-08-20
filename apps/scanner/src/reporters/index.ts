@@ -44,6 +44,8 @@ export interface JsonScanOutput {
 
     health: NonNullable<ScanResult["health"]>;
 
+    securityReport: NonNullable<ScanResult["securityReport"]>;
+
     ai: NonNullable<ScanResult["ai"]>;
 
     aiRootCause: NonNullable<ScanResult["aiRootCause"]>;
@@ -105,6 +107,9 @@ export class ConsoleReporter {
     const health =
       execution.result.health;
 
+    const securityReport =
+      execution.result.securityReport;
+
     const ai =
       execution.result.ai;
 
@@ -144,6 +149,14 @@ export class ConsoleReporter {
           `Dependencies: ${health.factors.find(factor => factor.name === "dependencies")?.status ?? "unknown"}`,
           `Security: ${health.factors.find(factor => factor.name === "security")?.status ?? "unknown"}`
         ].join(" | ")
+      );
+    }
+
+    if (
+      securityReport
+    ) {
+      console.log(
+        `Security Report: ${securityReport.status}, ${securityReport.summary.totalFindings} security finding(s), ${securityReport.summary.dependencyRiskSignals} dependency risk signal(s)`
       );
     }
 
@@ -272,6 +285,47 @@ export class JsonReporter {
             summary:
               "Health score was not calculated",
             factors:
+              []
+          },
+        securityReport:
+          execution.result.securityReport ?? {
+            schemaVersion:
+              "1.0.0",
+            generatedAt:
+              execution.result.completedAt,
+            status:
+              "passed",
+            summary:
+              {
+                totalFindings:
+                  0,
+                securityFindings:
+                  0,
+                secretFindings:
+                  0,
+                dependencyRiskSignals:
+                  0,
+                critical:
+                  0,
+                high:
+                  0,
+                medium:
+                  0,
+                low:
+                  0,
+                info:
+                  0
+              },
+            checks:
+              {
+                audit:
+                  "skipped",
+                secrets:
+                  "skipped"
+              },
+            findings:
+              [],
+            recommendations:
               []
           },
         ai:
@@ -527,6 +581,9 @@ export class MarkdownReporter {
     const findings =
       execution.validationReport.findings;
 
+    const securityReport =
+      execution.result.securityReport;
+
     const lines = [
       "# CodeSentinel Scan Report",
       "",
@@ -563,6 +620,15 @@ export class MarkdownReporter {
         );
       }
     }
+
+    lines.push(
+      "",
+      "## Security",
+      "",
+      securityReport
+        ? `Status: **${securityReport.status}** (${securityReport.summary.totalFindings} finding(s), ${securityReport.summary.dependencyRiskSignals} dependency risk signal(s))`
+        : "Status: not calculated"
+    );
 
     return lines.join(
       "\n"

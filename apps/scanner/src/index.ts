@@ -15,6 +15,7 @@ import {
   calculateProjectHealthScore,
   createAiAnalysisInput,
   createAiProvider,
+  createSecurityReport,
   deduplicateDetections,
   createTechnologyProfile
 } from "@codesentinel/scanner-core";
@@ -565,11 +566,24 @@ async function scanProject(
     });
 
   options.onProgress?.(
-    "Preparing AI explanations"
+    "Preparing security report"
   );
 
   const completedAt =
     new Date().toISOString();
+
+  const securityReport =
+    createSecurityReport({
+      generatedAt:
+        completedAt,
+      validation:
+        validationReport,
+      dependencyAnalysis
+    });
+
+  options.onProgress?.(
+    "Preparing AI explanations"
+  );
 
   const validationSummary = {
     passed:
@@ -719,6 +733,23 @@ async function scanProject(
 
 
   /*
+   * Save security report
+   */
+  await fs.writeFile(
+    path.join(
+      outputDirectory,
+      "security-report.json"
+    ),
+    JSON.stringify(
+      securityReport,
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+
+  /*
    * Save AI analysis input
    */
   await fs.writeFile(
@@ -813,6 +844,7 @@ async function scanProject(
     technologyProfile,
     dependencyAnalysis,
     health,
+    securityReport,
     ai,
     aiRootCause,
     aiFixSuggestions,

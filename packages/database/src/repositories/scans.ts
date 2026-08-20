@@ -19,6 +19,11 @@ export interface ScanRepository {
   list(
     limit?: number
   ): Promise<ScanRecord[]>;
+
+  listByProject(
+    projectId: string,
+    limit?: number
+  ): Promise<ScanRecord[]>;
 }
 
 export class MongoScanRepository implements ScanRepository {
@@ -47,6 +52,13 @@ export class MongoScanRepository implements ScanRepository {
     );
 
     await this.collection.createIndex({
+      createdAt:
+        -1
+    });
+
+    await this.collection.createIndex({
+      projectId:
+        1,
       createdAt:
         -1
     });
@@ -104,6 +116,39 @@ export class MongoScanRepository implements ScanRepository {
     return this.collection
       .find(
         {},
+        {
+          projection:
+            {
+              _id:
+                0,
+              stdout:
+                0,
+              stderr:
+                0
+            }
+        }
+      )
+      .sort({
+        createdAt:
+          -1
+      })
+      .limit(
+        limit
+      )
+      .toArray();
+  }
+
+  async listByProject(
+    projectId: string,
+    limit = 50
+  ): Promise<ScanRecord[]> {
+    await this.ensureIndexes();
+
+    return this.collection
+      .find(
+        {
+          projectId
+        },
         {
           projection:
             {
