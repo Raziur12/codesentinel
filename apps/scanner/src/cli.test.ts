@@ -265,6 +265,74 @@ test(
 );
 
 test(
+  "scanner CLI treats missing root commands as skipped instead of failed",
+  async () => {
+    const projectPath =
+      await createFixture({
+        "package.json":
+          JSON.stringify(
+            {
+              name:
+                "missing-commands-project",
+              version:
+                "1.0.0",
+              scripts:
+                {}
+            },
+            null,
+            2
+          ),
+        "app.js":
+          "console.log('missing commands project');\n"
+      });
+
+    const result =
+      await runScanner([
+        projectPath,
+        "--format=json"
+      ]);
+
+    assert.equal(
+      result.exitCode,
+      0,
+      result.stderr
+    );
+
+    const output =
+      JSON.parse(
+        result.stdout
+      );
+
+    assert.equal(
+      output.scan.summary.passed,
+      true
+    );
+
+    assert.equal(
+      output.scan.summary.failedCount,
+      0
+    );
+
+    assert.equal(
+      output.scan.summary.skippedCount > 0,
+      true
+    );
+
+    assert.equal(
+      output.scan.validation.results.some(
+        (result: {
+          category: string;
+          status: string;
+        }) =>
+          result.category === "build" &&
+          result.status === "skipped"
+      ),
+      true
+    );
+  }
+);
+
+test(
   "scanner CLI returns invalid-input exit code for an invalid format",
   async () => {
     const result =

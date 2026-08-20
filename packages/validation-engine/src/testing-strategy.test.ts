@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  discoverValidationPlan
+  discoverValidationPlan,
+  validateProject
 } from "./index.js";
 
 const repositoryRoot =
@@ -43,6 +46,65 @@ function commandByCategory(
   return plan.commands.find(
     command => command.category === category
   );
+}
+
+async function createTemporaryProject(
+  packageJson: unknown,
+  files: Record<string, string> = {}
+): Promise<string> {
+  const directory =
+    await fs.mkdtemp(
+      path.join(
+        os.tmpdir(),
+        "codesentinel-validation-"
+      )
+    );
+
+  await fs.writeFile(
+    path.join(
+      directory,
+      "package.json"
+    ),
+    JSON.stringify(
+      packageJson,
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  for (
+    const [
+      relativePath,
+      content
+    ] of Object.entries(
+      files
+    )
+  ) {
+    const filePath =
+      path.join(
+        directory,
+        relativePath
+      );
+
+    await fs.mkdir(
+      path.dirname(
+        filePath
+      ),
+      {
+        recursive:
+          true
+      }
+    );
+
+    await fs.writeFile(
+      filePath,
+      content,
+      "utf8"
+    );
+  }
+
+  return directory;
 }
 
 test(
@@ -255,6 +317,103 @@ test(
         "@fixture/web",
         "@fixture/api"
       ]
+    );
+  }
+);
+
+test(
+  "missing validation commands are skipped instead of failed",
+  async () => {
+    const projectPath =
+      await createTemporaryProject(
+        {
+          name:
+            "missing-root-commands",
+          version:
+            "1.0.0",
+          scripts:
+            {}
+        },
+        {
+          "app.js":
+            "console.log('missing command fixture');\n"
+        }
+      );
+
+    const plan =
+      await discoverValidationPlan(
+        projectPath
+      );
+
+    assert.equal(
+      commandByCategory(
+        plan,
+        "build"
+      )?.available,
+      false
+    );
+
+    assert.equal(
+      commandByCategory(
+        plan,
+        "test"
+      )?.available,
+      false
+    );
+
+    assert.equal(
+      commandByCategory(
+        plan,
+        "lint"
+      )?.available,
+      false
+    );
+
+    const report =
+      await validateProject(
+        projectPath,
+        plan.commands,
+        plan.packageManager,
+        plan.configuration
+      );
+
+    const skippedCategories =
+      report.results
+        .filter(
+          result => result.status === "skipped"
+        )
+        .map(
+          result => result.category
+        );
+
+    assert.deepEqual(
+      skippedCategories.filter(
+        category =>
+          [
+            "build",
+            "test",
+            "lint",
+            "type-check"
+          ].includes(
+            category
+          )
+      ),
+      [
+        "build",
+        "test",
+        "lint",
+        "type-check"
+      ]
+    );
+
+    assert.equal(
+      report.passed,
+      true
+    );
+
+    assert.equal(
+      report.findings.length,
+      0
     );
   }
 );
