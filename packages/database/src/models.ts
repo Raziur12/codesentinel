@@ -35,6 +35,8 @@ export interface ProjectRecord {
 export interface FindingRecord {
   id: string;
   scanId: string;
+  projectId?: string;
+  teamId?: string;
   severity: string;
   category: string;
   title: string;
@@ -65,6 +67,8 @@ export interface TechnologyProfileRecord {
 export interface AiAnalysisRecord {
   id: string;
   scanId: string;
+  projectId?: string;
+  teamId?: string;
   analysis: unknown;
   createdAt: string;
 }
@@ -72,6 +76,8 @@ export interface AiAnalysisRecord {
 export interface FixRecord {
   id: string;
   scanId: string;
+  projectId?: string;
+  teamId?: string;
   suggestion: unknown;
   createdAt: string;
 }

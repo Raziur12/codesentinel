@@ -25,6 +25,15 @@ export type {
   ProjectRepository
 } from "./repositories/projects.js";
 
+export {
+  MongoScanArtifactRepository
+} from "./repositories/artifacts.js";
+
+export type {
+  ScanArtifactRepository,
+  ScanArtifactSet
+} from "./repositories/artifacts.js";
+
 export type {
   AiAnalysisRecord,
   FindingRecord,

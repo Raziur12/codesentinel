@@ -8,13 +8,19 @@ import { fileURLToPath } from "node:url";
 import {
   getMongoDatabase,
   MongoProjectRepository,
+  MongoScanArtifactRepository,
   MongoScanRepository,
   readMongoDatabaseConfigFromEnv
 } from "@codesentinel/database";
 
 import type {
+  AiAnalysisRecord,
+  FindingRecord,
+  FixRecord,
   ProjectRecord,
   ProjectRepository,
+  ScanArtifactRepository,
+  ScanArtifactSet,
   ScanRecord,
   ScanRepository
 } from "@codesentinel/database";
@@ -149,12 +155,23 @@ const projectStorageDirectory =
     "projects"
   );
 
+const artifactStorageDirectory =
+  path.join(
+    repositoryRoot,
+    ".codesentinel-api",
+    "artifacts"
+  );
+
 let scanRepository:
   ScanRepository |
   undefined;
 
 let projectRepository:
   ProjectRepository |
+  undefined;
+
+let artifactRepository:
+  ScanArtifactRepository |
   undefined;
 
 function createScanId(): string {
@@ -222,6 +239,16 @@ async function ensureStorage(): Promise<void> {
 async function ensureProjectStorage(): Promise<void> {
   await fs.mkdir(
     projectStorageDirectory,
+    {
+      recursive:
+        true
+    }
+  );
+}
+
+async function ensureArtifactStorage(): Promise<void> {
+  await fs.mkdir(
+    artifactStorageDirectory,
     {
       recursive:
         true
@@ -504,6 +531,54 @@ class FileProjectRepository implements ProjectRepository {
   }
 }
 
+class FileScanArtifactRepository implements ScanArtifactRepository {
+  async replaceForScan(
+    scanId: string,
+    artifacts: ScanArtifactSet
+  ): Promise<void> {
+    await ensureArtifactStorage();
+
+    await Promise.all([
+      fs.writeFile(
+        path.join(
+          artifactStorageDirectory,
+          `${scanId}.findings.json`
+        ),
+        JSON.stringify(
+          artifacts.findings,
+          null,
+          2
+        ),
+        "utf8"
+      ),
+      fs.writeFile(
+        path.join(
+          artifactStorageDirectory,
+          `${scanId}.ai-analyses.json`
+        ),
+        JSON.stringify(
+          artifacts.aiAnalyses,
+          null,
+          2
+        ),
+        "utf8"
+      ),
+      fs.writeFile(
+        path.join(
+          artifactStorageDirectory,
+          `${scanId}.fix-suggestions.json`
+        ),
+        JSON.stringify(
+          artifacts.fixes,
+          null,
+          2
+        ),
+        "utf8"
+      )
+    ]);
+  }
+}
+
 async function getScanRepository(): Promise<ScanRepository> {
   if (
     scanRepository
@@ -566,6 +641,38 @@ async function getProjectRepository(): Promise<ProjectRepository> {
     new FileProjectRepository();
 
   return projectRepository;
+}
+
+async function getArtifactRepository(): Promise<ScanArtifactRepository> {
+  if (
+    artifactRepository
+  ) {
+    return artifactRepository;
+  }
+
+  const mongoConfig =
+    readMongoDatabaseConfigFromEnv();
+
+  if (
+    mongoConfig
+  ) {
+    const database =
+      await getMongoDatabase(
+        mongoConfig
+      );
+
+    artifactRepository =
+      new MongoScanArtifactRepository(
+        database
+      );
+
+    return artifactRepository;
+  }
+
+  artifactRepository =
+    new FileScanArtifactRepository();
+
+  return artifactRepository;
 }
 
 function sendJson(
@@ -750,6 +857,203 @@ function extractHealthPercent(
   );
 }
 
+function asRecord(
+  value: unknown
+): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function asArray(
+  value: unknown
+): unknown[] {
+  return Array.isArray(
+    value
+  )
+    ? value
+    : [];
+}
+
+function asString(
+  value: unknown,
+  fallback: string
+): string {
+  return typeof value === "string" && value.trim()
+    ? value
+    : fallback;
+}
+
+function asNumber(
+  value: unknown
+): number | undefined {
+  return typeof value === "number"
+    ? value
+    : undefined;
+}
+
+function getReportScan(
+  report: unknown
+): Record<string, unknown> | undefined {
+  return asRecord(
+    asRecord(
+      report
+    )?.scan
+  );
+}
+
+function createArtifactId(
+  scanId: string,
+  type: string,
+  index: number
+): string {
+  return `${scanId}_${type}_${index + 1}`;
+}
+
+function createScanArtifacts(
+  record: ScanRecord
+): ScanArtifactSet {
+  const scan =
+    getReportScan(
+      record.report
+    );
+
+  const createdAt =
+    record.updatedAt;
+
+  const findings: FindingRecord[] =
+    asArray(
+      scan?.findings
+    ).map(
+      (
+        value,
+        index
+      ) => {
+        const finding =
+          asRecord(
+            value
+          ) ?? {};
+
+        return {
+          id:
+            asString(
+              finding.id,
+              createArtifactId(
+                record.id,
+                "finding",
+                index
+              )
+            ),
+          scanId:
+            record.id,
+          projectId:
+            record.projectId,
+          teamId:
+            record.teamId,
+          severity:
+            asString(
+              finding.severity,
+              "info"
+            ),
+          category:
+            asString(
+              finding.category,
+              "general"
+            ),
+          title:
+            asString(
+              finding.title,
+              "Finding"
+            ),
+          message:
+            asString(
+              finding.message,
+              "No message provided"
+            ),
+          file:
+            typeof finding.file === "string"
+              ? finding.file
+              : undefined,
+          line:
+            asNumber(
+              finding.line
+            ),
+          column:
+            asNumber(
+              finding.column
+            ),
+          createdAt
+        };
+      }
+    );
+
+  const aiRootCause =
+    asRecord(
+      scan?.aiRootCause
+    );
+
+  const aiFixSuggestions =
+    asRecord(
+      scan?.aiFixSuggestions
+    );
+
+  const aiAnalyses: AiAnalysisRecord[] =
+    asArray(
+      aiRootCause?.analyses
+    ).map(
+      (
+        analysis,
+        index
+      ) => ({
+        id:
+          createArtifactId(
+            record.id,
+            "ai",
+            index
+          ),
+        scanId:
+          record.id,
+        projectId:
+          record.projectId,
+        teamId:
+          record.teamId,
+        analysis,
+        createdAt
+      })
+    );
+
+  const fixes: FixRecord[] =
+    asArray(
+      aiFixSuggestions?.suggestions
+    ).map(
+      (
+        suggestion,
+        index
+      ) => ({
+        id:
+          createArtifactId(
+            record.id,
+            "fix",
+            index
+          ),
+        scanId:
+          record.id,
+        projectId:
+          record.projectId,
+        teamId:
+          record.teamId,
+        suggestion,
+        createdAt
+      })
+    );
+
+  return {
+    findings,
+    aiAnalyses,
+    fixes
+  };
+}
+
 async function upsertProjectFromPath(
   projectPath: string,
   teamId: string | undefined,
@@ -930,6 +1234,15 @@ async function runScan(
 
       await repository.save(
         completedRecord
+      );
+
+      await (
+        await getArtifactRepository()
+      ).replaceForScan(
+        completedRecord.id,
+        createScanArtifacts(
+          completedRecord
+        )
       );
 
       if (
