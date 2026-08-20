@@ -1898,6 +1898,33 @@ export function createApiServer(): http.Server {
   );
 }
 
+async function ensureRepositoryIndexes(
+  repository: unknown
+): Promise<void> {
+  if (
+    repository &&
+    typeof repository === "object" &&
+    "ensureIndexes" in repository &&
+    typeof repository.ensureIndexes === "function"
+  ) {
+    await repository.ensureIndexes();
+  }
+}
+
+export async function initializeApiStorage(): Promise<void> {
+  await Promise.all([
+    ensureRepositoryIndexes(
+      await getScanRepository()
+    ),
+    ensureRepositoryIndexes(
+      await getProjectRepository()
+    ),
+    ensureRepositoryIndexes(
+      await getArtifactRepository()
+    )
+  ]);
+}
+
 const shouldStartServer =
   process.argv[1] &&
   path.resolve(
@@ -1914,12 +1941,30 @@ if (
       process.env.PORT ?? 4317
     );
 
-  createApiServer().listen(
-    port,
-    () => {
-      console.log(
-        `CodeSentinel API listening on http://localhost:${port}`
-      );
-    }
-  );
+  await initializeApiStorage();
+
+  createApiServer()
+    .listen(
+      port,
+      () => {
+        console.log(
+          `CodeSentinel API listening on http://localhost:${port}`
+        );
+      }
+    )
+    .on(
+      "error",
+      error => {
+        if (
+          "code" in error &&
+          error.code === "EADDRINUSE"
+        ) {
+          console.error(
+            `Port ${port} is already in use. Stop the old API process or set PORT to another value.`
+          );
+        }
+
+        throw error;
+      }
+    );
 }
