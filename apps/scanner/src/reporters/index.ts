@@ -420,3 +420,217 @@ export class JsonReporter {
     );
   }
 }
+
+function severityToSarifLevel(
+  severity: string | undefined
+): "error" | "warning" | "note" {
+  if (
+    severity === "critical" ||
+    severity === "high"
+  ) {
+    return "error";
+  }
+
+  if (
+    severity === "medium" ||
+    severity === "low"
+  ) {
+    return "warning";
+  }
+
+  return "note";
+}
+
+function getFindingLocation(
+  finding: ValidationReport["findings"][number]
+) {
+  if (
+    !finding.file
+  ) {
+    return undefined;
+  }
+
+  return {
+    physicalLocation:
+      {
+        artifactLocation:
+          {
+            uri:
+              finding.file.replace(
+                /\\/g,
+                "/"
+              )
+          },
+        region:
+          {
+            startLine:
+              finding.line ?? 1,
+            startColumn:
+              finding.column ?? 1
+          }
+      }
+  };
+}
+
+export class MarkdownReporter {
+  createOutput(
+    execution: ScanExecution
+  ): string {
+    const summary =
+      execution.result.validation;
+
+    const health =
+      execution.result.health;
+
+    const findings =
+      execution.validationReport.findings;
+
+    const lines = [
+      "# CodeSentinel Scan Report",
+      "",
+      `Project: \`${execution.result.projectPath}\``,
+      `Status: **${summary?.passed ? "passed" : "failed"}**`,
+      health
+        ? `Health: **${health.score}/${health.maxScore} (${health.grade})**`
+        : "Health: not calculated",
+      "",
+      "## Summary",
+      "",
+      `- Passed: ${summary?.passedCount ?? 0}`,
+      `- Failed: ${summary?.failedCount ?? 0}`,
+      `- Warnings: ${summary?.warningCount ?? 0}`,
+      `- Skipped: ${summary?.skippedCount ?? 0}`,
+      "",
+      "## Findings",
+      ""
+    ];
+
+    if (
+      findings.length === 0
+    ) {
+      lines.push(
+        "No active findings."
+      );
+    } else {
+      for (
+        const finding
+        of findings
+      ) {
+        lines.push(
+          `- **${finding.severity.toUpperCase()}** ${finding.title}: ${finding.message}`
+        );
+      }
+    }
+
+    return lines.join(
+      "\n"
+    );
+  }
+
+  write(
+    execution: ScanExecution
+  ): void {
+    console.log(
+      this.createOutput(
+        execution
+      )
+    );
+  }
+}
+
+export class SarifReporter {
+  createOutput(
+    execution: ScanExecution
+  ) {
+    return {
+      version:
+        "2.1.0",
+      $schema:
+        "https://json.schemastore.org/sarif-2.1.0.json",
+      runs:
+        [
+          {
+            tool:
+              {
+                driver:
+                  {
+                    name:
+                      "CodeSentinel",
+                    informationUri:
+                      "https://github.com/Raziur12/codesentinel",
+                    rules:
+                      execution.validationReport.findings.map(
+                        finding => ({
+                          id:
+                            finding.code ?? finding.category,
+                          name:
+                            finding.title,
+                          shortDescription:
+                            {
+                              text:
+                                finding.title
+                            },
+                          fullDescription:
+                            {
+                              text:
+                                finding.message
+                            },
+                          defaultConfiguration:
+                            {
+                              level:
+                                severityToSarifLevel(
+                                  finding.severity
+                                )
+                            }
+                        })
+                      )
+                  }
+              },
+            results:
+              execution.validationReport.findings.map(
+                finding => {
+                  const location =
+                    getFindingLocation(
+                      finding
+                    );
+
+                  return {
+                    ruleId:
+                      finding.code ?? finding.category,
+                    level:
+                      severityToSarifLevel(
+                        finding.severity
+                      ),
+                    message:
+                      {
+                        text:
+                          finding.message
+                      },
+                    locations:
+                      location
+                        ? [
+                            location
+                          ]
+                        : []
+                  };
+                }
+              )
+          }
+        ]
+    };
+  }
+
+  write(
+    execution: ScanExecution
+  ): void {
+    console.log(
+      JSON.stringify(
+        this.createOutput(
+          execution
+        ),
+        null,
+        2
+      )
+    );
+  }
+}

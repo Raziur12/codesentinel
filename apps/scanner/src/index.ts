@@ -37,7 +37,9 @@ import {
 
 import {
   ConsoleReporter,
-  JsonReporter
+  JsonReporter,
+  MarkdownReporter,
+  SarifReporter
 } from "./reporters/index.js";
 
 import type {
@@ -49,7 +51,7 @@ interface CliOptions {
 
   workspacePath?: string;
 
-  format: "text" | "json";
+  format: "text" | "json" | "markdown" | "sarif";
 
   fix: boolean;
 
@@ -197,11 +199,12 @@ function parseCliOptions(
         args[index + 1];
 
       if (
-        requestedFormat !== "json" &&
-        requestedFormat !== "text"
+        !isSupportedFormat(
+          requestedFormat
+        )
       ) {
         throw new InvalidInputError(
-          "--format requires json or text"
+          "--format requires text, json, markdown, or sarif"
         );
       }
 
@@ -221,11 +224,12 @@ function parseCliOptions(
         );
 
       if (
-        requestedFormat !== "json" &&
-        requestedFormat !== "text"
+        !isSupportedFormat(
+          requestedFormat
+        )
       ) {
         throw new InvalidInputError(
-          "--format requires json or text"
+          "--format requires text, json, markdown, or sarif"
         );
       }
 
@@ -279,6 +283,15 @@ function parseCliOptions(
 
     aiProvider
   };
+}
+
+function isSupportedFormat(
+  value: string | undefined
+): value is CliOptions["format"] {
+  return value === "text" ||
+    value === "json" ||
+    value === "markdown" ||
+    value === "sarif";
 }
 
 function getAiFixMode(
@@ -793,10 +806,14 @@ async function main(): Promise<number> {
       : undefined;
 
   if (
-    cliOptions.format === "json"
+    cliOptions.format !== "text"
   ) {
     const reporter =
-      new JsonReporter();
+      cliOptions.format === "json"
+        ? new JsonReporter()
+        : cliOptions.format === "markdown"
+          ? new MarkdownReporter()
+          : new SarifReporter();
 
     const execution =
       await withConsoleSilenced(

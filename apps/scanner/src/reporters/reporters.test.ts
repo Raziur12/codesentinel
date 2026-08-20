@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   ConsoleReporter,
-  JsonReporter
+  JsonReporter,
+  MarkdownReporter,
+  SarifReporter
 } from "./index.js";
 
 import type {
@@ -270,6 +272,56 @@ test(
     assert.match(
       output,
       /Skipped: 1/
+    );
+  }
+);
+
+test(
+  "markdown reporter creates a readable scan report",
+  () => {
+    const output =
+      new MarkdownReporter().createOutput(
+        execution
+      );
+
+    assert.match(
+      output,
+      /# CodeSentinel Scan Report/
+    );
+
+    assert.match(
+      output,
+      /Status: \*\*passed\*\*/
+    );
+
+    assert.match(
+      output,
+      /Skipped: 1/
+    );
+  }
+);
+
+test(
+  "sarif reporter creates SARIF 2.1.0 output",
+  () => {
+    const output =
+      new SarifReporter().createOutput(
+        execution
+      );
+
+    assert.equal(
+      output.version,
+      "2.1.0"
+    );
+
+    assert.equal(
+      output.runs[0].tool.driver.name,
+      "CodeSentinel"
+    );
+
+    assert.deepEqual(
+      output.runs[0].results,
+      []
     );
   }
 );

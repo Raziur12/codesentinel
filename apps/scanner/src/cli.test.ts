@@ -265,6 +265,104 @@ test(
 );
 
 test(
+  "scanner CLI writes markdown report",
+  async () => {
+    const projectPath =
+      await createFixture({
+        "package.json":
+          JSON.stringify(
+            {
+              name:
+                "markdown-project",
+              version:
+                "1.0.0",
+              scripts:
+                {}
+            },
+            null,
+            2
+          ),
+        "app.js":
+          "console.log('markdown project');\n"
+      });
+
+    const result =
+      await runScanner([
+        projectPath,
+        "--format=markdown"
+      ]);
+
+    assert.equal(
+      result.exitCode,
+      0,
+      result.stderr
+    );
+
+    assert.match(
+      result.stdout,
+      /# CodeSentinel Scan Report/
+    );
+
+    assert.match(
+      result.stdout,
+      /Status: \*\*passed\*\*/
+    );
+  }
+);
+
+test(
+  "scanner CLI writes SARIF report",
+  async () => {
+    const projectPath =
+      await createFixture({
+        "package.json":
+          JSON.stringify(
+            {
+              name:
+                "sarif-project",
+              version:
+                "1.0.0",
+              scripts:
+                {}
+            },
+            null,
+            2
+          ),
+        "app.js":
+          "console.log('sarif project');\n"
+      });
+
+    const result =
+      await runScanner([
+        projectPath,
+        "--format",
+        "sarif"
+      ]);
+
+    assert.equal(
+      result.exitCode,
+      0,
+      result.stderr
+    );
+
+    const output =
+      JSON.parse(
+        result.stdout
+      );
+
+    assert.equal(
+      output.version,
+      "2.1.0"
+    );
+
+    assert.equal(
+      output.runs[0].tool.driver.name,
+      "CodeSentinel"
+    );
+  }
+);
+
+test(
   "scanner CLI treats missing root commands as skipped instead of failed",
   async () => {
     const projectPath =
@@ -349,7 +447,7 @@ test(
 
     assert.match(
       result.stderr,
-      /--format requires json or text/
+      /--format requires text, json, markdown, or sarif/
     );
   }
 );
