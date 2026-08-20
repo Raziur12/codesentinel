@@ -94,6 +94,7 @@ input {
   padding: 24px;
   display: grid;
   gap: 18px;
+  align-content: start;
 }
 
 .toolbar {
@@ -129,6 +130,25 @@ h3 {
   font-size: 13px;
 }
 
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff7f7;
+  color: var(--bad);
+  padding: 12px 14px;
+}
+
+.notice code {
+  color: var(--text);
+}
+
+.hidden {
+  display: none;
+}
+
 .scan-form {
   display: grid;
   grid-template-columns: minmax(210px, 280px) minmax(160px, 240px) 110px;
@@ -160,7 +180,7 @@ button {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -208,7 +228,8 @@ button {
 .scan-list,
 .findings-list,
 .ai-list,
-.fix-list {
+.fix-list,
+.trend-list {
   display: grid;
   gap: 10px;
 }
@@ -217,6 +238,7 @@ button {
 .finding-row,
 .ai-row,
 .fix-row,
+.trend-row,
 .factor {
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -237,6 +259,7 @@ button {
 .finding-row strong,
 .ai-row strong,
 .fix-row strong,
+.trend-row strong,
 .factor strong {
   display: block;
   margin-bottom: 4px;
@@ -246,6 +269,7 @@ button {
 .finding-row span,
 .ai-row span,
 .fix-row span,
+.trend-row span,
 .factor span {
   color: var(--muted);
   font-size: 12px;
@@ -326,6 +350,13 @@ button {
 .bar-fill {
   height: 100%;
   background: var(--accent);
+}
+
+.trend-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 80px;
+  align-items: center;
+  gap: 10px;
 }
 
 .severity-critical,

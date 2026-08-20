@@ -197,6 +197,72 @@ async function readScanRecord(
   }
 }
 
+async function listScanRecords(
+  limit = 50
+): Promise<ScanRecord[]> {
+  try {
+    const entries =
+      await fs.readdir(
+        storageDirectory
+      );
+
+    const records =
+      await Promise.all(
+        entries
+          .filter(
+            entry => entry.endsWith(
+              ".json"
+            )
+          )
+          .map(
+            async entry => {
+              try {
+                return JSON.parse(
+                  await fs.readFile(
+                    path.join(
+                      storageDirectory,
+                      entry
+                    ),
+                    "utf8"
+                  )
+                ) as ScanRecord;
+              } catch {
+                return undefined;
+              }
+            }
+          )
+      );
+
+    return records
+      .filter(
+        (record): record is ScanRecord => Boolean(
+          record
+        )
+      )
+      .map(
+        ({
+          stdout,
+          stderr,
+          ...summary
+        }) => summary
+      )
+      .sort(
+        (
+          left,
+          right
+        ) => right.createdAt.localeCompare(
+          left.createdAt
+        )
+      )
+      .slice(
+        0,
+        limit
+      );
+  } catch {
+    return [];
+  }
+}
+
 class FileScanRepository implements ScanRepository {
   async save(
     record: ScanRecord
@@ -211,6 +277,14 @@ class FileScanRepository implements ScanRepository {
   ): Promise<ScanRecord | undefined> {
     return readScanRecord(
       scanId
+    );
+  }
+
+  async list(
+    limit?: number
+  ): Promise<ScanRecord[]> {
+    return listScanRecords(
+      limit
     );
   }
 }
@@ -267,11 +341,13 @@ function sendJson(
   );
 
   response.end(
-    JSON.stringify(
-      body,
-      null,
-      2
-    )
+    body === null
+      ? undefined
+      : JSON.stringify(
+          body,
+          null,
+          2
+        )
   );
 }
 
@@ -518,6 +594,40 @@ async function createScan(
   };
 }
 
+function summarizeScanRecord(
+  record: ScanRecord
+): Omit<ScanRecord, "stdout" | "stderr"> {
+  const {
+    stdout,
+    stderr,
+    ...summary
+  } = record;
+
+  return summary;
+}
+
+async function listScans(): Promise<ApiResponse> {
+  const repository =
+    await getScanRepository();
+
+  const records =
+    await repository.list(
+      50
+    );
+
+  return {
+    status:
+      200,
+    body:
+      {
+        scans:
+          records.map(
+            summarizeScanRecord
+          )
+      }
+  };
+}
+
 async function getScan(
   scanId: string
 ): Promise<ApiResponse> {
@@ -543,17 +653,13 @@ async function getScan(
     };
   }
 
-  const {
-    stdout,
-    stderr,
-    ...summary
-  } = record;
-
   return {
     status:
       200,
     body:
-      summary
+      summarizeScanRecord(
+        record
+      )
   };
 }
 
@@ -695,12 +801,21 @@ export async function handleApiRequest(
           endpoints:
             [
               "POST /scans",
+              "GET /scans",
               "GET /scans/:id",
               "GET /scans/:id/findings",
               "GET /scans/:id/report"
             ]
         }
     };
+  }
+
+  if (
+    request.method === "GET" &&
+    parts[0] === "scans" &&
+    parts.length === 1
+  ) {
+    return listScans();
   }
 
   if (

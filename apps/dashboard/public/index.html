@@ -19,16 +19,20 @@
         </div>
         <nav class="nav">
           <button class="nav-item active" data-view="overview" title="Overview">
-            <span class="icon">◆</span>
+            <span class="icon">+</span>
             Overview
           </button>
           <button class="nav-item" data-view="findings" title="Findings">
-            <span class="icon">●</span>
+            <span class="icon">!</span>
             Findings
           </button>
           <button class="nav-item" data-view="ai" title="AI">
-            <span class="icon">✦</span>
+            <span class="icon">*</span>
             AI
+          </button>
+          <button class="nav-item" data-view="trends" title="Trends">
+            <span class="icon">%</span>
+            Trends
           </button>
         </nav>
       </aside>
@@ -46,7 +50,16 @@
           </form>
         </section>
 
+        <section id="connection-help" class="notice hidden">
+          <strong>API is offline</strong>
+          <span>Start backend with <code>npm run api</code>, keep MongoDB env ready, then click Refresh.</span>
+        </section>
+
         <section class="metrics">
+          <article class="metric">
+            <span>Projects</span>
+            <strong id="project-count">0</strong>
+          </article>
           <article class="metric">
             <span>Health</span>
             <strong id="health-score">--</strong>
@@ -109,6 +122,14 @@
               <div id="ai-list" class="ai-list"></div>
               <h3>Fix Suggestions</h3>
               <div id="fix-list" class="fix-list"></div>
+            </section>
+
+            <section class="panel trends-view view" data-view-panel="trends">
+              <div class="panel-header">
+                <h2>Trends</h2>
+                <span id="trends-label"></span>
+              </div>
+              <div id="trend-list" class="trend-list"></div>
             </section>
           </div>
         </section>

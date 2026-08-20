@@ -9,6 +9,8 @@ const elements = {
   projectPath: document.querySelector("#project-path"),
   form: document.querySelector("#scan-form"),
   connectionStatus: document.querySelector("#connection-status"),
+  connectionHelp: document.querySelector("#connection-help"),
+  projectCount: document.querySelector("#project-count"),
   scanCount: document.querySelector("#scan-count"),
   scanList: document.querySelector("#scan-list"),
   refreshScan: document.querySelector("#refresh-scan"),
@@ -23,7 +25,9 @@ const elements = {
   findingsList: document.querySelector("#findings-list"),
   aiLabel: document.querySelector("#ai-label"),
   aiList: document.querySelector("#ai-list"),
-  fixList: document.querySelector("#fix-list")
+  fixList: document.querySelector("#fix-list"),
+  trendsLabel: document.querySelector("#trends-label"),
+  trendList: document.querySelector("#trend-list")
 };
 
 elements.apiUrl.value = state.apiUrl;
@@ -51,7 +55,14 @@ function html(value) {
 }
 
 async function fetchJson(path, options) {
-  const response = await fetch(endpoint(path), options);
+  let response;
+
+  try {
+    response = await fetch(endpoint(path), options);
+  } catch {
+    throw new Error("API offline. Start backend with npm run api.");
+  }
+
   const body = await response.json();
 
   if (!response.ok) {
@@ -64,14 +75,17 @@ async function fetchJson(path, options) {
 function setConnection(text, ok = true) {
   elements.connectionStatus.textContent = text;
   elements.connectionStatus.style.color = ok ? "#0f9f6e" : "#dc2626";
+  elements.connectionHelp.classList.toggle("hidden", ok);
 }
 
 async function checkApi() {
   try {
     const body = await fetchJson("/");
     setConnection(`${body.name}: ${body.status}`);
+    return true;
   } catch (error) {
     setConnection(error.message, false);
+    return false;
   }
 }
 
@@ -97,7 +111,26 @@ function getValidation(scan) {
   return getScanReport(scan)?.summary;
 }
 
+function getProjects() {
+  return [...new Set(
+    state.scans
+      .map(scan => scan.projectPath)
+      .filter(Boolean)
+  )];
+}
+
+function severityClass(severity) {
+  return String(severity ?? "info").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+}
+
+function getHealthPercent(scan) {
+  const health = getHealth(scan);
+  if (!health?.maxScore) return undefined;
+  return Math.round((health.score / health.maxScore) * 100);
+}
+
 function renderScans() {
+  elements.projectCount.textContent = String(getProjects().length);
   elements.scanCount.textContent = String(state.scans.length);
   elements.scanList.innerHTML = "";
 
@@ -160,13 +193,13 @@ function renderFactors(scan) {
 function flattenStack(profile) {
   if (!profile) return [];
   return [
-    ...profile.languages,
-    ...profile.runtimes,
-    ...profile.frameworks,
-    ...profile.databases,
-    ...profile.buildTools,
-    ...profile.packageManagers,
-    ...profile.infrastructure
+    ...(profile.languages ?? []),
+    ...(profile.runtimes ?? []),
+    ...(profile.frameworks ?? []),
+    ...(profile.databases ?? []),
+    ...(profile.buildTools ?? []),
+    ...(profile.packageManagers ?? []),
+    ...(profile.infrastructure ?? [])
   ];
 }
 
@@ -197,7 +230,8 @@ function renderSeverity(scan) {
   };
 
   for (const finding of getFindings(scan)) {
-    if (finding.severity in counts) counts[finding.severity] += 1;
+    const severity = severityClass(finding.severity);
+    if (severity in counts) counts[severity] += 1;
   }
 
   const max = Math.max(1, ...Object.values(counts));
@@ -230,7 +264,7 @@ function renderFindings(scan) {
     item.className = "finding-row";
     item.innerHTML = `
       <strong>${html(finding.title)}</strong>
-      <span class="severity-${html(finding.severity)}">${html(finding.severity)} - ${html(finding.category)} - ${html(finding.code ?? "no code")}</span>
+      <span class="severity-${severityClass(finding.severity)}">${html(finding.severity)} - ${html(finding.category)} - ${html(finding.code ?? "no code")}</span>
       <p>${html(finding.message)}</p>
       <span>${html(finding.file ? `${finding.file}:${finding.line ?? ""}:${finding.column ?? ""}` : "No file location")}</span>
     `;
@@ -278,6 +312,34 @@ function renderAi(scan) {
   }
 }
 
+function renderTrends() {
+  const scans = [...state.scans]
+    .filter(scan => scan.createdAt)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .slice(-10);
+
+  elements.trendsLabel.textContent = `${scans.length} recent scan(s)`;
+  elements.trendList.innerHTML = "";
+
+  if (scans.length === 0) {
+    elements.trendList.innerHTML = `<div class="empty">No trend data yet</div>`;
+    return;
+  }
+
+  for (const scan of scans) {
+    const health = getHealthPercent(scan);
+    const findings = getFindings(scan).length;
+    const row = document.createElement("div");
+    row.className = "trend-row";
+    row.innerHTML = `
+      <strong>${html(new Date(scan.createdAt).toLocaleDateString())}</strong>
+      <div class="bar-track"><div class="bar-fill" style="width:${health ?? 0}%"></div></div>
+      <span>${html(health === undefined ? scan.status : `${health}%`)} / ${html(findings)} finding(s)</span>
+    `;
+    elements.trendList.append(row);
+  }
+}
+
 function getSelectedScan() {
   return state.scans.find(scan => scan.id === state.selectedScanId) ?? state.scans[0];
 }
@@ -293,12 +355,30 @@ function renderAll() {
   renderSeverity(scan);
   renderFindings(scan);
   renderAi(scan);
+  renderTrends();
   saveState();
+}
+
+async function loadScans() {
+  const body = await fetchJson("/scans");
+  state.scans = body.scans ?? [];
+
+  if (
+    state.selectedScanId &&
+    !state.scans.some(scan => scan.id === state.selectedScanId)
+  ) {
+    state.selectedScanId = state.scans[0]?.id;
+  }
+
+  renderAll();
 }
 
 async function refreshSelectedScan() {
   const selected = getSelectedScan();
-  if (!selected) return;
+  if (!selected) {
+    await loadScans();
+    return;
+  }
 
   const scan = await fetchJson(`/scans/${selected.id}`);
   const index = state.scans.findIndex(item => item.id === selected.id);
@@ -307,17 +387,25 @@ async function refreshSelectedScan() {
     state.scans[index] = scan;
   }
 
+  await loadScans();
   renderAll();
 }
 
 async function createScan(projectPath) {
-  const created = await fetchJson("/scans", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({ projectPath })
-  });
+  let created;
+
+  try {
+    created = await fetchJson("/scans", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ projectPath })
+    });
+  } catch (error) {
+    setConnection(error.message, false);
+    return;
+  }
 
   state.scans = [
     created,
@@ -327,9 +415,14 @@ async function createScan(projectPath) {
   renderAll();
 
   const interval = window.setInterval(async () => {
-    await refreshSelectedScan();
-    const scan = getSelectedScan();
-    if (scan && !["queued", "running"].includes(scan.status)) {
+    try {
+      await refreshSelectedScan();
+      const scan = getSelectedScan();
+      if (scan && !["queued", "running"].includes(scan.status)) {
+        window.clearInterval(interval);
+      }
+    } catch (error) {
+      setConnection(error.message, false);
       window.clearInterval(interval);
     }
   }, 1500);
@@ -345,7 +438,7 @@ elements.form.addEventListener("submit", event => {
 elements.refreshScan.addEventListener("click", () => {
   state.apiUrl = elements.apiUrl.value.trim();
   saveState();
-  void refreshSelectedScan();
+  void loadScans().catch(error => setConnection(error.message, false));
 });
 
 for (const button of document.querySelectorAll(".nav-item")) {
@@ -357,5 +450,7 @@ for (const button of document.querySelectorAll(".nav-item")) {
   });
 }
 
-await checkApi();
+if (await checkApi()) {
+  await loadScans();
+}
 renderAll();

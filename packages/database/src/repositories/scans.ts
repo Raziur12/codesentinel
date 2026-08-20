@@ -15,6 +15,10 @@ export interface ScanRepository {
   read(
     scanId: string
   ): Promise<ScanRecord | undefined>;
+
+  list(
+    limit?: number
+  ): Promise<ScanRecord[]>;
 }
 
 export class MongoScanRepository implements ScanRepository {
@@ -90,5 +94,35 @@ export class MongoScanRepository implements ScanRepository {
       );
 
     return record ?? undefined;
+  }
+
+  async list(
+    limit = 50
+  ): Promise<ScanRecord[]> {
+    await this.ensureIndexes();
+
+    return this.collection
+      .find(
+        {},
+        {
+          projection:
+            {
+              _id:
+                0,
+              stdout:
+                0,
+              stderr:
+                0
+            }
+        }
+      )
+      .sort({
+        createdAt:
+          -1
+      })
+      .limit(
+        limit
+      )
+      .toArray();
   }
 }
