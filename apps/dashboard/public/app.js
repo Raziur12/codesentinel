@@ -1,5 +1,12 @@
+const defaultApiUrl = "http://localhost:4317";
+
+function normalizeApiUrl(value) {
+  const trimmed = String(value ?? "").trim();
+  return trimmed.length > 0 ? trimmed : defaultApiUrl;
+}
+
 const state = {
-  apiUrl: localStorage.getItem("codesentinel.apiUrl") ?? "http://localhost:4317",
+  apiUrl: normalizeApiUrl(localStorage.getItem("codesentinel.apiUrl")),
   scans: JSON.parse(localStorage.getItem("codesentinel.scans") ?? "[]"),
   selectedScanId: localStorage.getItem("codesentinel.selectedScanId")
 };
@@ -33,6 +40,8 @@ const elements = {
 elements.apiUrl.value = state.apiUrl;
 
 function saveState() {
+  state.apiUrl = normalizeApiUrl(state.apiUrl);
+  elements.apiUrl.value = state.apiUrl;
   localStorage.setItem("codesentinel.apiUrl", state.apiUrl);
   localStorage.setItem("codesentinel.scans", JSON.stringify(state.scans));
 
@@ -42,7 +51,7 @@ function saveState() {
 }
 
 function endpoint(path) {
-  return `${state.apiUrl.replace(/\/$/, "")}${path}`;
+  return `${normalizeApiUrl(state.apiUrl).replace(/\/$/, "")}${path}`;
 }
 
 function html(value) {
@@ -63,7 +72,14 @@ async function fetchJson(path, options) {
     throw new Error("API offline. Start backend with npm run api.");
   }
 
-  const body = await response.json();
+  const text = await response.text();
+  let body;
+
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error("API URL is not returning JSON. Use http://localhost:4317 and start npm run api.");
+  }
 
   if (!response.ok) {
     throw new Error(body.error ?? `Request failed with ${response.status}`);
@@ -430,13 +446,13 @@ async function createScan(projectPath) {
 
 elements.form.addEventListener("submit", event => {
   event.preventDefault();
-  state.apiUrl = elements.apiUrl.value.trim();
+  state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
   saveState();
   void createScan(elements.projectPath.value.trim() || ".");
 });
 
 elements.refreshScan.addEventListener("click", () => {
-  state.apiUrl = elements.apiUrl.value.trim();
+  state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
   saveState();
   void loadScans().catch(error => setConnection(error.message, false));
 });
@@ -451,6 +467,6 @@ for (const button of document.querySelectorAll(".nav-item")) {
 }
 
 if (await checkApi()) {
-  await loadScans();
+  await loadScans().catch(error => setConnection(error.message, false));
 }
 renderAll();
