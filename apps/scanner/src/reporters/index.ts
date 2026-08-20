@@ -50,6 +50,8 @@ export interface JsonScanOutput {
 
     aiFixSuggestions: NonNullable<ScanResult["aiFixSuggestions"]>;
 
+    aiPatchPlan: NonNullable<ScanResult["aiPatchPlan"]>;
+
     aiProvider: NonNullable<ScanResult["aiProvider"]>;
 
     validation: ValidationReport;
@@ -112,6 +114,9 @@ export class ConsoleReporter {
     const aiFixSuggestions =
       execution.result.aiFixSuggestions;
 
+    const aiPatchPlan =
+      execution.result.aiPatchPlan;
+
     const aiProvider =
       execution.result.aiProvider;
 
@@ -163,6 +168,14 @@ export class ConsoleReporter {
     ) {
       console.log(
         `AI Fix Suggestions: ${aiFixSuggestions.suggestions.length} suggestion(s), mode ${aiFixSuggestions.mode}, no files modified`
+      );
+    }
+
+    if (
+      aiPatchPlan
+    ) {
+      console.log(
+        `AI Patch Plan: ${aiPatchPlan.patches.length} proposed patch(es), no files modified`
       );
     }
 
@@ -374,6 +387,35 @@ export class JsonReporter {
                   "Fix suggestions were not calculated",
                 count:
                   0
+              }
+          },
+        aiPatchPlan:
+          execution.result.aiPatchPlan ?? {
+            schemaVersion:
+              "1.0.0",
+            generatedAt:
+              execution.result.completedAt,
+            purpose:
+              "ai-patch-plan",
+            provider:
+              execution.result.aiProvider?.id ?? "none",
+            patches:
+              [],
+            skipped:
+              {
+                reason:
+                  "Patch plan was not calculated"
+              },
+            guardrails:
+              {
+                automaticPatchApplied:
+                  false,
+                requireExplicitConfirmation:
+                  true,
+                runValidationAfterPatch:
+                  true,
+                rollbackIfValidationWorsens:
+                  true
               }
           },
         aiProvider:

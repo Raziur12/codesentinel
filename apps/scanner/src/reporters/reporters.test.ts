@@ -127,6 +127,35 @@ const execution: ScanExecution = {
         undefined,
       aiFixSuggestions:
         undefined,
+      aiPatchPlan:
+        {
+          schemaVersion:
+            "1.0.0",
+          generatedAt:
+            "2026-08-20T00:00:01.000Z",
+          purpose:
+            "ai-patch-plan",
+          provider:
+            "local-deterministic",
+          patches:
+            [],
+          skipped:
+            {
+              reason:
+                "No patches"
+            },
+          guardrails:
+            {
+              automaticPatchApplied:
+                false,
+              requireExplicitConfirmation:
+                true,
+              runValidationAfterPatch:
+                true,
+              rollbackIfValidationWorsens:
+                true
+            }
+        },
       aiProvider:
         {
           id:
@@ -211,6 +240,11 @@ test(
       output.scan.findings,
       []
     );
+
+    assert.equal(
+      output.scan.aiPatchPlan.guardrails.automaticPatchApplied,
+      false
+    );
   }
 );
 
@@ -272,6 +306,11 @@ test(
     assert.match(
       output,
       /Skipped: 1/
+    );
+
+    assert.match(
+      output,
+      /AI Patch Plan: 0 proposed patch/
     );
   }
 );

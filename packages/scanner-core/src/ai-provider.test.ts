@@ -144,7 +144,7 @@ test(
 
     assert.equal(
       provider.capabilities.generatePatch,
-      false
+      true
     );
 
     assert.equal(
@@ -164,7 +164,17 @@ test(
 
     assert.equal(
       patchPlan.patches.length,
-      0
+      1
+    );
+
+    assert.equal(
+      patchPlan.guardrails.automaticPatchApplied,
+      false
+    );
+
+    assert.equal(
+      patchPlan.patches[0]?.automaticPatchApplied,
+      false
     );
   }
 );

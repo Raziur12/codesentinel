@@ -261,6 +261,16 @@ test(
       output.scan.summary.failedCount > 0,
       true
     );
+
+    assert.equal(
+      output.scan.aiPatchPlan.guardrails.automaticPatchApplied,
+      false
+    );
+
+    assert.equal(
+      output.scan.aiPatchPlan.patches.length > 0,
+      true
+    );
   }
 );
 
@@ -426,6 +436,176 @@ test(
           result.status === "skipped"
       ),
       true
+    );
+  }
+);
+
+test(
+  "scanner CLI shows progress for text scans by default",
+  async () => {
+    const projectPath =
+      await createFixture({
+        "package.json":
+          JSON.stringify(
+            {
+              name:
+                "progress-project",
+              version:
+                "1.0.0",
+              scripts:
+                {}
+            },
+            null,
+            2
+          ),
+        "app.js":
+          "console.log('progress project');\n"
+      });
+
+    const result =
+      await runScanner([
+        projectPath
+      ]);
+
+    assert.equal(
+      result.exitCode,
+      0,
+      result.stderr
+    );
+
+    assert.match(
+      result.stderr,
+      /Progress: Collecting project files/
+    );
+
+    assert.match(
+      result.stdout,
+      /Summary: passed/
+    );
+  }
+);
+
+test(
+  "scanner CLI quiet mode prints only the final status",
+  async () => {
+    const projectPath =
+      await createFixture({
+        "package.json":
+          JSON.stringify(
+            {
+              name:
+                "quiet-project",
+              version:
+                "1.0.0",
+              scripts:
+                {}
+            },
+            null,
+            2
+          ),
+        "app.js":
+          "console.log('quiet project');\n"
+      });
+
+    const result =
+      await runScanner([
+        projectPath,
+        "--quiet"
+      ]);
+
+    assert.equal(
+      result.exitCode,
+      0,
+      result.stderr
+    );
+
+    assert.equal(
+      result.stdout.trim(),
+      "passed"
+    );
+  }
+);
+
+test(
+  "scanner CLI verbose mode includes validation command output",
+  async () => {
+    const projectPath =
+      await createFixture({
+        "package.json":
+          JSON.stringify(
+            {
+              name:
+                "verbose-project",
+              version:
+                "1.0.0",
+              scripts:
+                {}
+            },
+            null,
+            2
+          ),
+        "app.js":
+          "console.log('verbose project');\n"
+      });
+
+    const result =
+      await runScanner([
+        projectPath,
+        "--verbose",
+        "--no-progress"
+      ]);
+
+    assert.equal(
+      result.exitCode,
+      0,
+      result.stderr
+    );
+
+    assert.match(
+      result.stdout,
+      /Running command: npm install/
+    );
+  }
+);
+
+test(
+  "scanner CLI debug mode prints debug context",
+  async () => {
+    const projectPath =
+      await createFixture({
+        "package.json":
+          JSON.stringify(
+            {
+              name:
+                "debug-project",
+              version:
+                "1.0.0",
+              scripts:
+                {}
+            },
+            null,
+            2
+          ),
+        "app.js":
+          "console.log('debug project');\n"
+      });
+
+    const result =
+      await runScanner([
+        projectPath,
+        "--debug",
+        "--no-progress"
+      ]);
+
+    assert.equal(
+      result.exitCode,
+      0,
+      result.stderr
+    );
+
+    assert.match(
+      result.stderr,
+      /Debug: format=text/
     );
   }
 );

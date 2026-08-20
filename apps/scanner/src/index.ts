@@ -60,6 +60,14 @@ interface CliOptions {
   interactive: boolean;
 
   aiProvider: string;
+
+  quiet: boolean;
+
+  verbose: boolean;
+
+  debug: boolean;
+
+  progress: boolean;
 }
 
 const EXIT_VALIDATION_PASSED =
@@ -111,6 +119,18 @@ function parseCliOptions(
   let aiProvider =
     "local-deterministic";
 
+  let quiet =
+    false;
+
+  let verbose =
+    false;
+
+  let debug =
+    false;
+
+  let progress =
+    true;
+
   for (
     let index = 0;
     index < args.length;
@@ -118,6 +138,43 @@ function parseCliOptions(
   ) {
     const arg =
       args[index];
+
+    if (
+      arg === "--quiet" ||
+      arg === "-q"
+    ) {
+      quiet =
+        true;
+      progress =
+        false;
+      continue;
+    }
+
+    if (
+      arg === "--verbose"
+    ) {
+      verbose =
+        true;
+      continue;
+    }
+
+    if (
+      arg === "--debug"
+    ) {
+      debug =
+        true;
+      verbose =
+        true;
+      continue;
+    }
+
+    if (
+      arg === "--no-progress"
+    ) {
+      progress =
+        false;
+      continue;
+    }
 
     if (
       arg === "--fix"
@@ -281,7 +338,15 @@ function parseCliOptions(
 
     interactive,
 
-    aiProvider
+    aiProvider,
+
+    quiet,
+
+    verbose,
+
+    debug,
+
+    progress
   };
 }
 
@@ -375,7 +440,9 @@ async function getFiles(
 async function scanProject(
   projectPath: string,
   plugins: ScannerPlugin[],
-  options: Pick<CliOptions, "fix" | "dryRun" | "interactive" | "aiProvider"> = {
+  options: Pick<CliOptions, "fix" | "dryRun" | "interactive" | "aiProvider"> & {
+    onProgress?: (message: string) => void;
+  } = {
     fix:
       false,
     dryRun:
@@ -392,6 +459,10 @@ async function scanProject(
   /*
    * 1. Collect project files
    */
+  options.onProgress?.(
+    "Collecting project files"
+  );
+
   const files =
     await getFiles(projectPath);
 
@@ -404,10 +475,18 @@ async function scanProject(
   /*
    * 2. Analyze project structure
    */
+  options.onProgress?.(
+    "Analyzing project structure"
+  );
+
   const projectStructure =
     await analyzeProject(
       projectPath
     );
+
+  options.onProgress?.(
+    "Analyzing dependencies"
+  );
 
   const dependencyAnalysis =
     await analyzeDependencies(
@@ -418,6 +497,10 @@ async function scanProject(
   /*
    * 3. Run every detector exactly once
    */
+  options.onProgress?.(
+    "Detecting technology stack"
+  );
+
   const rawTechnologies = [];
 
   for (const plugin of plugins) {
@@ -452,10 +535,18 @@ async function scanProject(
   /*
    * 6. Discover and run project validation
    */
+  options.onProgress?.(
+    "Discovering validation commands"
+  );
+
   const validationPlan =
     await discoverValidationPlan(
       projectPath
     );
+
+  options.onProgress?.(
+    "Running validation commands"
+  );
 
   const validationReport =
     await validateProject(
@@ -472,6 +563,10 @@ async function scanProject(
       validation:
         validationReport
     });
+
+  options.onProgress?.(
+    "Preparing AI explanations"
+  );
 
   const completedAt =
     new Date().toISOString();
@@ -545,10 +640,19 @@ async function scanProject(
       )
     );
 
+  const aiPatchPlan =
+    await aiProvider.generatePatch(
+      aiFixSuggestions
+    );
+
 
   /*
    * 7. Save CodeSentinel artifacts
    */
+  options.onProgress?.(
+    "Writing scan artifacts"
+  );
+
   const outputDirectory =
     path.join(
       projectPath,
@@ -664,6 +768,22 @@ async function scanProject(
     "utf8"
   );
 
+  /*
+   * Save safe AI patch plan
+   */
+  await fs.writeFile(
+    path.join(
+      outputDirectory,
+      "ai-patch-plan.json"
+    ),
+    JSON.stringify(
+      aiPatchPlan,
+      null,
+      2
+    ),
+    "utf8"
+  );
+
 
   /*
    * Save validation report
@@ -696,6 +816,7 @@ async function scanProject(
     ai,
     aiRootCause,
     aiFixSuggestions,
+    aiPatchPlan,
     aiProvider:
       {
         id:
@@ -715,6 +836,56 @@ async function scanProject(
     result,
     validationReport
   };
+}
+
+function createProgressLogger(
+  options: CliOptions
+): ((message: string) => void) | undefined {
+  if (
+    options.format !== "text" ||
+    options.quiet ||
+    !options.progress
+  ) {
+    return undefined;
+  }
+
+  return message => {
+    console.error(
+      `Progress: ${message}`
+    );
+  };
+}
+
+function writeQuietSummary(
+  execution: ScanExecution
+): void {
+  const summary =
+    execution.result.validation;
+
+  console.log(
+    summary?.passed
+      ? "passed"
+      : "failed"
+  );
+}
+
+function writeDebugContext(
+  options: CliOptions,
+  projectPath: string
+): void {
+  if (
+    !options.debug
+  ) {
+    return;
+  }
+
+  console.error(
+    `Debug: format=${options.format} quiet=${options.quiet} verbose=${options.verbose} progress=${options.progress}`
+  );
+
+  console.error(
+    `Debug: projectPath=${projectPath}`
+  );
 }
 
 async function withConsoleSilenced<T>(
@@ -805,6 +976,11 @@ async function main(): Promise<number> {
         )
       : undefined;
 
+  writeDebugContext(
+    cliOptions,
+    projectPath
+  );
+
   if (
     cliOptions.format !== "text"
   ) {
@@ -841,26 +1017,61 @@ async function main(): Promise<number> {
   const reporter =
     new ConsoleReporter();
 
-  reporter.start({
-    displayInput,
-    projectPath,
-    workspacePath:
-      relativeWorkspacePath
-  });
+  if (
+    !cliOptions.quiet
+  ) {
+    reporter.start({
+      displayInput,
+      projectPath,
+      workspacePath:
+        relativeWorkspacePath
+    });
+  }
 
 
   const execution =
-    await scanProject(
-      projectPath,
-      [
-        universalTechnologyPlugin
-      ],
-      cliOptions
-    );
+    cliOptions.verbose
+      ? await scanProject(
+          projectPath,
+          [
+            universalTechnologyPlugin
+          ],
+          {
+            ...cliOptions,
+            onProgress:
+              createProgressLogger(
+                cliOptions
+              )
+          }
+        )
+      : await withConsoleSilenced(
+          () =>
+            scanProject(
+              projectPath,
+              [
+                universalTechnologyPlugin
+              ],
+              {
+                ...cliOptions,
+                onProgress:
+                  createProgressLogger(
+                    cliOptions
+                  )
+              }
+            )
+        );
 
-  reporter.complete(
-    execution
-  );
+  if (
+    cliOptions.quiet
+  ) {
+    writeQuietSummary(
+      execution
+    );
+  } else {
+    reporter.complete(
+      execution
+    );
+  }
 
   return getValidationExitCode(
     execution

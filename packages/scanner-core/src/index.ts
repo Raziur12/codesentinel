@@ -388,12 +388,24 @@ export interface AiFixSuggestions {
   };
 }
 
+export interface AiPatchProposal {
+  id: string;
+  findingId: string;
+  title: string;
+  affectedFiles: string[];
+  diffPreview: string;
+  validationCommands: string[];
+  status: "proposed";
+  automaticPatchApplied: false;
+  requiresConfirmation: true;
+}
+
 export interface AiPatchPlan {
   schemaVersion: "1.0.0";
   generatedAt: string;
   purpose: "ai-patch-plan";
   provider: string;
-  patches: [];
+  patches: AiPatchProposal[];
   skipped: {
     reason: string;
   };
@@ -587,6 +599,8 @@ export interface ScanResult {
   aiRootCause?: AiRootCauseAnalysis;
 
   aiFixSuggestions?: AiFixSuggestions;
+
+  aiPatchPlan?: AiPatchPlan;
 
   aiProvider?: {
     id: string;
@@ -1246,6 +1260,72 @@ export function createEmptyPatchPlan(
   };
 }
 
+export function createAiPatchPlan(
+  input: {
+    fixSuggestions: AiFixSuggestions;
+    provider: string;
+  }
+): AiPatchPlan {
+  const patches =
+    input.fixSuggestions.suggestions.map(
+      suggestion => ({
+        id:
+          `${suggestion.findingId}_patch`,
+        findingId:
+          suggestion.findingId,
+        title:
+          suggestion.title,
+        affectedFiles:
+          suggestion.affectedFiles,
+        diffPreview:
+          suggestion.diffPreview ??
+          "No diff preview is available for this suggestion.",
+        validationCommands:
+          [
+            "npm test",
+            "npm run build",
+            "npm run lint"
+          ],
+        status:
+          "proposed" as const,
+        automaticPatchApplied:
+          false as const,
+        requiresConfirmation:
+          true as const
+      })
+    );
+
+  return {
+    schemaVersion:
+      "1.0.0",
+    generatedAt:
+      input.fixSuggestions.generatedAt,
+    purpose:
+      "ai-patch-plan",
+    provider:
+      input.provider,
+    patches,
+    skipped:
+      {
+        reason:
+          patches.length === 0
+            ? "No active fix suggestions available for patch planning"
+            : "Patch plan generated; no files were modified"
+      },
+    guardrails:
+      {
+        automaticPatchApplied:
+          false,
+        requireExplicitConfirmation:
+          true,
+        runValidationAfterPatch:
+          true,
+        rollbackIfValidationWorsens:
+          true
+      }
+  };
+}
+
 export class LocalDeterministicAiProvider implements AiProvider {
   id =
     "local-deterministic";
@@ -1261,7 +1341,7 @@ export class LocalDeterministicAiProvider implements AiProvider {
     suggestFix:
       true,
     generatePatch:
-      false
+      true
   };
 
   async analyzeFindings(
@@ -1312,9 +1392,8 @@ export class LocalDeterministicAiProvider implements AiProvider {
   async generatePatch(
     fixSuggestions: AiFixSuggestions
   ): Promise<AiPatchPlan> {
-    return createEmptyPatchPlan({
-      generatedAt:
-        fixSuggestions.generatedAt,
+    return createAiPatchPlan({
+      fixSuggestions,
       provider:
         this.id
     });
