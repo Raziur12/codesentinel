@@ -1,0 +1,16 @@
+{
+  "name": "node-express-project",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node --check server.js",
+    "test": "node --test",
+    "lint": "eslint server.js"
+  },
+  "dependencies": {
+    "express": "latest"
+  },
+  "devDependencies": {
+    "eslint": "latest"
+  }
+}

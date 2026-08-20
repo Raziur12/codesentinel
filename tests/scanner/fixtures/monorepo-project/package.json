@@ -1,0 +1,14 @@
+{
+  "name": "monorepo-project",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "echo root build",
+    "test": "echo root test",
+    "lint": "echo root lint"
+  }
+}

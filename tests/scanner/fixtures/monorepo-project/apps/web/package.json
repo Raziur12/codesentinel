@@ -1,0 +1,16 @@
+{
+  "name": "@fixture/web",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "vite": "latest",
+    "react": "latest"
+  },
+  "devDependencies": {
+    "vitest": "latest"
+  }
+}

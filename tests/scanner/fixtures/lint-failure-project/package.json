@@ -1,0 +1,13 @@
+{
+  "name": "lint-failure-project",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo build passes",
+    "test": "echo test passes",
+    "lint": "node lint-failure.cjs"
+  },
+  "devDependencies": {
+    "eslint": "latest"
+  }
+}
