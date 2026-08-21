@@ -91,6 +91,23 @@ async function validateProjectPath(
   }
 }
 
+async function existingDirectoryPath(
+  projectPath: string
+): Promise<string | undefined> {
+  try {
+    const stats =
+      await fs.stat(
+        projectPath
+      );
+
+    return stats.isDirectory()
+      ? projectPath
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function resolveWorkspaceProjectPath(
   rootProjectPath: string,
   workspacePath: string
@@ -138,8 +155,26 @@ export async function resolveProjectPath(
     );
   }
 
+  const cwdRelativePath =
+    path.resolve(
+      process.cwd(),
+      inputPath
+    );
+
+  const existingCwdRelativePath =
+    await existingDirectoryPath(
+      cwdRelativePath
+    );
+
+  if (
+    existingCwdRelativePath
+  ) {
+    return existingCwdRelativePath;
+  }
+
   /*
-   * Find actual CodeSentinel monorepo root.
+   * Fallback for running the scanner from inside this monorepo
+   * while passing a path relative to the repository root.
    */
   const workspaceRoot =
     await findWorkspaceRoot(

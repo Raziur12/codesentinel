@@ -70,7 +70,16 @@ async function createFixture(
 }
 
 function runScanner(
-  args: string[]
+  args: string[],
+  cwd =
+    path.resolve(
+      path.dirname(
+        scannerEntry
+      ),
+      "..",
+      "..",
+      ".."
+    )
 ): Promise<CommandResult> {
   return new Promise(
     (resolve, reject) => {
@@ -83,14 +92,7 @@ function runScanner(
           ],
           {
             cwd:
-              path.resolve(
-                path.dirname(
-                  scannerEntry
-                ),
-                "..",
-                "..",
-                ".."
-              ),
+              cwd,
             windowsHide:
               true,
             stdio:
@@ -225,6 +227,70 @@ test(
     assert.equal(
       securityReport.schemaVersion,
       "1.0.0"
+    );
+  }
+);
+
+test(
+  "scanner CLI resolves relative project paths from the current working directory",
+  async () => {
+    const projectPath =
+      await createFixture({
+        "package.json":
+          JSON.stringify(
+            {
+              name:
+                "cwd-relative-project",
+              version:
+                "1.0.0",
+              scripts:
+                {
+                  build:
+                    "node --check app.js",
+                  test:
+                    "node --test",
+                  lint:
+                    "node --check app.js"
+                }
+            },
+            null,
+            2
+          ),
+        "app.js":
+          "console.log('cwd relative project');\n"
+      });
+
+    const parentDirectory =
+      path.dirname(
+        projectPath
+      );
+
+    const result =
+      await runScanner(
+        [
+          path.basename(
+            projectPath
+          ),
+          "--format",
+          "json"
+        ],
+        parentDirectory
+      );
+
+    assert.equal(
+      result.exitCode,
+      0,
+      result.stderr
+    );
+
+    const output =
+      JSON.parse(
+        result.stdout
+      );
+
+    assert.equal(
+      output.scan.project.path,
+      projectPath
     );
   }
 );
