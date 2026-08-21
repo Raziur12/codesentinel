@@ -1213,6 +1213,12 @@ function explainFinding(
 export function createAiRootCauseAnalysis(
   input: AiAnalysisInput
 ): AiRootCauseAnalysis {
+  const explainableIssues =
+    [
+      ...input.findings,
+      ...input.warnings
+    ];
+
   return {
     schemaVersion:
       "1.0.0",
@@ -1223,17 +1229,17 @@ export function createAiRootCauseAnalysis(
     guardrails:
       input.guardrails,
     analyses:
-      input.findings.map(
+      explainableIssues.map(
         explainFinding
       ),
     skipped:
       {
         reason:
-          input.findings.length === 0
-            ? "No findings available for root-cause analysis"
-            : "Only active findings are analyzed; warnings remain in the AI analysis input",
+          explainableIssues.length === 0
+            ? "No findings or warnings available for root-cause analysis"
+            : "All active findings and warnings are analyzed",
         count:
-          input.warnings.length
+          0
       }
   };
 }

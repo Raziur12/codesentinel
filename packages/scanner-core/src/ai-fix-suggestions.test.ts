@@ -103,7 +103,7 @@ const rootCauseAnalysis: AiRootCauseAnalysis = {
   skipped:
     {
       reason:
-        "Only active findings are analyzed; warnings remain in the AI analysis input",
+        "All active findings and warnings are analyzed",
       count:
         0
     }

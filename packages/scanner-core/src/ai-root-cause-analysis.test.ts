@@ -11,7 +11,8 @@ import type {
 } from "./index.js";
 
 function createInput(
-  findings: AiFindingInput[]
+  findings: AiFindingInput[],
+  warnings: AiFindingInput[] = []
 ): AiAnalysisInput {
   return {
     schemaVersion:
@@ -81,8 +82,7 @@ function createInput(
           []
       },
     findings,
-    warnings:
-      []
+    warnings
   };
 }
 
@@ -144,6 +144,62 @@ test(
     assert.equal(
       result?.howToFix.text,
       "Assign a string value."
+    );
+  }
+);
+
+test(
+  "explains validation warnings as AI activity",
+  () => {
+    const analysis =
+      createAiRootCauseAnalysis(
+        createInput(
+          [],
+          [
+            {
+              id:
+                "cs_engine",
+              severity:
+                "medium",
+              category:
+                "engine",
+              code:
+                "EBADENGINE",
+              title:
+                "Node.js engine warning",
+              message:
+                "Package engine requirement does not match the current Node.js environment.",
+              source:
+                "validation-engine",
+              suggestion:
+                "Use a Node.js version compatible with package engine requirements.",
+              confidence:
+                0.95,
+              evidence:
+                "npm reported EBADENGINE"
+            }
+          ]
+        )
+      );
+
+    assert.equal(
+      analysis.analyses.length,
+      1
+    );
+
+    assert.equal(
+      analysis.analyses[0]?.code,
+      "EBADENGINE"
+    );
+
+    assert.equal(
+      analysis.skipped.count,
+      0
+    );
+
+    assert.equal(
+      analysis.skipped.reason,
+      "All active findings and warnings are analyzed"
     );
   }
 );
