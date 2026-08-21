@@ -200,6 +200,24 @@ function getHealthPercent(scan) {
   return Math.round((health.score / health.maxScore) * 100);
 }
 
+function getDisplayStatus(scan) {
+  const rawStatus = scan?.status ?? "--";
+  if (["queued", "running", "failed", "error"].includes(rawStatus)) {
+    return rawStatus;
+  }
+
+  if (getIssues(scan).length > 0) {
+    return "warning";
+  }
+
+  const validation = getValidation(scan);
+  if (validation) {
+    return validation.passed ? "passed" : "failed";
+  }
+
+  return rawStatus;
+}
+
 function renderScans() {
   elements.projectCount.textContent = String(getProjects().length);
   elements.scanCount.textContent = String(state.scans.length);
@@ -211,7 +229,7 @@ function renderScans() {
   }
 
   for (const scan of state.scans) {
-    const status = scan.status ?? "queued";
+    const status = getDisplayStatus(scan);
     const createdAt = scan.createdAt
       ? new Date(scan.createdAt).toLocaleString()
       : "not started";
@@ -239,9 +257,8 @@ function renderScans() {
 
 function renderMetrics(scan) {
   const health = getHealth(scan);
-  const validation = getValidation(scan);
   const issues = getIssues(scan);
-  const status = validation ? (validation.passed ? "passed" : "failed") : scan?.status ?? "--";
+  const status = getDisplayStatus(scan);
   const healthPercent = getHealthPercent(scan);
 
   elements.healthScore.textContent = health ? `${health.score}/${health.maxScore}` : "--";
@@ -518,7 +535,7 @@ function getCoreFeatures(scan) {
     },
     {
       name: "Quality Gates",
-      ...featureStatus([build, tests, lint, typeCheck].some(item => item.status === "failed") ? "failed" : "active", `build ${build.status}, test ${tests.status}, lint ${lint.status}, type ${typeCheck.status}`)
+      ...featureStatus([build, tests, lint, typeCheck].some(item => item.status === "failed") ? "failed" : issues.length > 0 ? "warning" : "active", `build ${build.status}, test ${tests.status}, lint ${lint.status}, type ${typeCheck.status}, issues ${issues.length}`)
     }
   ];
 }
@@ -566,7 +583,7 @@ function renderTrends() {
     row.innerHTML = `
       <strong>${html(new Date(scan.createdAt).toLocaleDateString())}</strong>
       <div class="bar-track"><div class="bar-fill" style="width:${health ?? 0}%"></div></div>
-      <span>${html(health === undefined ? scan.status : `Health ${health}%`)}<br>${html(issues)} issue(s)</span>
+      <span>${html(health === undefined ? getDisplayStatus(scan) : `Health ${health}%`)}<br>${html(issues)} issue(s)</span>
     `;
     elements.trendList.append(row);
   }
