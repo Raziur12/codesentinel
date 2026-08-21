@@ -17,6 +17,7 @@ const elements = {
   apiToken: document.querySelector("#api-token"),
   projectPath: document.querySelector("#project-path"),
   zipFile: document.querySelector("#zip-file"),
+  zipFileName: document.querySelector("#zip-file-name"),
   uploadZip: document.querySelector("#upload-zip"),
   form: document.querySelector("#scan-form"),
   connectionStatus: document.querySelector("#connection-status"),
@@ -109,6 +110,7 @@ async function fetchJson(path, options) {
 function setConnection(text, ok = true) {
   elements.connectionStatus.textContent = text;
   elements.connectionStatus.style.color = ok ? "#0f9f6e" : "#dc2626";
+  elements.connectionStatus.dataset.status = ok ? "ok" : "error";
   elements.connectionHelp.classList.toggle("hidden", ok);
 }
 
@@ -209,12 +211,20 @@ function renderScans() {
   }
 
   for (const scan of state.scans) {
+    const status = scan.status ?? "queued";
+    const createdAt = scan.createdAt
+      ? new Date(scan.createdAt).toLocaleString()
+      : "not started";
     const row = document.createElement("button");
     row.type = "button";
     row.className = `scan-row ${scan.id === state.selectedScanId ? "active" : ""}`;
+    row.dataset.status = status;
     row.innerHTML = `
-      <strong>${html(scan.status ?? "queued")}</strong>
-      <span>${html(compactPath(scan.projectPath))}</span>
+      <span class="scan-row-top">
+        <b>${html(status)}</b>
+        <small>${html(createdAt)}</small>
+      </span>
+      <strong>${html(compactPath(scan.projectPath))}</strong>
       <span>${html(scan.id)}</span>
     `;
     row.addEventListener("click", () => {
@@ -231,11 +241,17 @@ function renderMetrics(scan) {
   const health = getHealth(scan);
   const validation = getValidation(scan);
   const issues = getIssues(scan);
+  const status = validation ? (validation.passed ? "passed" : "failed") : scan?.status ?? "--";
+  const healthPercent = getHealthPercent(scan);
 
   elements.healthScore.textContent = health ? `${health.score}/${health.maxScore}` : "--";
-  elements.validationStatus.textContent = validation ? (validation.passed ? "passed" : "failed") : scan?.status ?? "--";
+  elements.validationStatus.textContent = status;
   elements.findingCount.textContent = String(issues.length);
   elements.projectLabel.textContent = compactPath(scan?.projectPath);
+  elements.healthScore.closest(".metric").dataset.state =
+    healthPercent === undefined ? "neutral" : healthPercent >= 80 ? "good" : healthPercent >= 60 ? "warn" : "bad";
+  elements.validationStatus.closest(".metric").dataset.state = severityClass(status);
+  elements.findingCount.closest(".metric").dataset.state = issues.length === 0 ? "good" : "warn";
 }
 
 function renderFactors(scan) {
@@ -709,6 +725,11 @@ elements.uploadZip.addEventListener("click", () => {
   state.apiToken = elements.apiToken.value.trim();
   saveState();
   void createZipUploadScan(file);
+});
+
+elements.zipFile.addEventListener("change", () => {
+  const file = elements.zipFile.files?.[0];
+  elements.zipFileName.textContent = file ? file.name : "Choose ZIP";
 });
 
 for (const button of document.querySelectorAll(".nav-item")) {

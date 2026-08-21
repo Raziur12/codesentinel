@@ -43,29 +43,35 @@
 
       <main class="main">
         <section class="toolbar">
-          <div>
-            <h1>Dashboard</h1>
+          <div class="page-title">
+            <span class="eyebrow">Project Assurance</span>
+            <h1>CodeSentinel</h1>
             <p id="connection-status">API not checked</p>
           </div>
           <form id="scan-form" class="scan-form">
-            <label class="field">
-              <span>API Base URL</span>
-              <input id="api-url" type="url" value="http://localhost:4317" aria-label="API Base URL">
-            </label>
-            <label class="field">
-              <span>API Token</span>
-              <input id="api-token" type="password" placeholder="Optional" aria-label="API Token">
-            </label>
-            <label class="field">
-              <span>Project Path</span>
-              <input id="project-path" type="text" value="." aria-label="Project Path">
-            </label>
-            <label class="field">
-              <span>ZIP Upload</span>
-              <input id="zip-file" type="file" accept=".zip,application/zip" aria-label="ZIP Upload">
-            </label>
-            <button type="submit">Run Scan</button>
-            <button id="upload-zip" class="secondary" type="button">Upload ZIP</button>
+            <div class="field-grid">
+              <label class="field">
+                <span>API Base URL</span>
+                <input id="api-url" type="url" value="http://localhost:4317" aria-label="API Base URL">
+              </label>
+              <label class="field">
+                <span>API Token</span>
+                <input id="api-token" type="password" placeholder="Optional" aria-label="API Token">
+              </label>
+              <label class="field">
+                <span>Project Path</span>
+                <input id="project-path" type="text" value="." aria-label="Project Path">
+              </label>
+            </div>
+            <div class="action-grid">
+              <label class="file-drop" for="zip-file">
+                <span>ZIP Upload</span>
+                <strong id="zip-file-name">Choose ZIP</strong>
+                <input id="zip-file" type="file" accept=".zip,application/zip" aria-label="ZIP Upload">
+              </label>
+              <button type="submit">Run Scan</button>
+              <button id="upload-zip" class="secondary" type="button">Upload ZIP</button>
+            </div>
           </form>
         </section>
 
