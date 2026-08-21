@@ -445,6 +445,53 @@ test(
     );
 
     assert.equal(
+      output.scan.project.path,
+      projectPath
+    );
+
+    assert.equal(
+      output.scan.project.filesScanned > 0,
+      true
+    );
+
+    assert.equal(
+      Array.isArray(
+        output.scan.technologyProfile.languages
+      ),
+      true
+    );
+
+    assert.equal(
+      output.scan.validation.packageManager,
+      "npm"
+    );
+
+    assert.equal(
+      output.scan.findings.length > 0,
+      true
+    );
+
+    assert.equal(
+      output.scan.securityReport.schemaVersion,
+      "1.0.0"
+    );
+
+    assert.equal(
+      output.scan.aiRootCause.analyses.length > 0,
+      true
+    );
+
+    assert.equal(
+      output.scan.aiFixSuggestions.suggestions.length > 0,
+      true
+    );
+
+    assert.equal(
+      output.scan.aiFixSuggestions.suggestions[0].suggestedAction.length > 0,
+      true
+    );
+
+    assert.equal(
       output.scan.aiPatchPlan.guardrails.automaticPatchApplied,
       false
     );
