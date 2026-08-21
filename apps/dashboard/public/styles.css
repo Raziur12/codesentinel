@@ -548,6 +548,77 @@ button:hover {
   margin-bottom: 18px;
 }
 
+.scan-progress {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 14px;
+}
+
+.progress-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 14px;
+}
+
+.progress-main strong,
+.progress-main span {
+  display: block;
+}
+
+.progress-main span {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.progress-main b {
+  color: var(--accent-strong);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.progress-track {
+  height: 10px;
+  border-radius: 999px;
+  background: #dfe8ef;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-strong);
+  transition: width 200ms ease;
+}
+
+.record-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.record-grid span {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--muted);
+  padding: 9px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.record-grid b {
+  display: block;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+
 .factor[data-status="passed"] {
   border-color: #a7f3d0;
   background: #fbfffd;
@@ -574,6 +645,18 @@ button:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.tech-group {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tech-group strong {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
 }
 
 .chip {
@@ -726,6 +809,7 @@ button:hover {
 
   .scan-form,
   .metrics,
+  .record-grid,
   .status-grid {
     grid-template-columns: 1fr;
   }

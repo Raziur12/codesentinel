@@ -37,6 +37,7 @@ const elements = {
   validationStatus: document.querySelector("#validation-status"),
   findingCount: document.querySelector("#finding-count"),
   projectLabel: document.querySelector("#project-label"),
+  scanProgress: document.querySelector("#scan-progress"),
   factorGrid: document.querySelector("#factor-grid"),
   technologyStack: document.querySelector("#technology-stack"),
   severityDistribution: document.querySelector("#severity-distribution"),
@@ -227,6 +228,73 @@ function getHealthPercent(scan) {
   return Math.round((health.score / health.maxScore) * 100);
 }
 
+function getElapsedSeconds(scan) {
+  const start = scan?.createdAt ? Date.parse(scan.createdAt) : undefined;
+  const end = scan?.updatedAt && !isScanPending(scan) ? Date.parse(scan.updatedAt) : Date.now();
+
+  if (!start || Number.isNaN(start) || Number.isNaN(end)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round((end - start) / 1000));
+}
+
+function formatDuration(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+function getScanProgress(scan) {
+  if (!scan) {
+    return {
+      percent: 0,
+      label: "No scan selected",
+      detail: "Upload files, upload ZIP, or scan a local path."
+    };
+  }
+
+  if (hasReport(scan)) {
+    return {
+      percent: 100,
+      label: "Report ready",
+      detail: "Technology, validation, findings, and health data are available."
+    };
+  }
+
+  if (scan.status === "queued") {
+    return {
+      percent: 8,
+      label: "Queued",
+      detail: "Waiting for scan worker."
+    };
+  }
+
+  if (scan.status === "running") {
+    const elapsed = getElapsedSeconds(scan);
+    return {
+      percent: Math.min(95, 18 + elapsed * 2),
+      label: "Scanning",
+      detail: "Analyzing project structure, stack, validation commands, and findings."
+    };
+  }
+
+  if (scan.status === "failed" || scan.status === "error") {
+    return {
+      percent: 100,
+      label: scan.status,
+      detail: scan.error ?? "Scan finished with errors."
+    };
+  }
+
+  return {
+    percent: 0,
+    label: scan.status ?? "Unknown",
+    detail: "Scan status is pending."
+  };
+}
+
 function getDisplayStatus(scan) {
   const rawStatus = scan?.status ?? "--";
   if (["queued", "running", "failed", "error"].includes(rawStatus)) {
@@ -378,6 +446,37 @@ function renderMetrics(scan) {
   elements.findingCount.closest(".metric").dataset.state = issues.length === 0 ? "good" : "warn";
 }
 
+function renderScanProgress(scan) {
+  const progress = getScanProgress(scan);
+  const report = getScanReport(scan);
+  const elapsed = getElapsedSeconds(scan);
+  const filesScanned = report?.filesScanned ?? "--";
+  const issueCount = getIssues(scan).length;
+  const startedAt = scan?.createdAt ? new Date(scan.createdAt).toLocaleString() : "--";
+  const finishedAt = scan?.updatedAt && !isScanPending(scan) ? new Date(scan.updatedAt).toLocaleString() : "--";
+
+  elements.scanProgress.innerHTML = `
+    <div class="progress-main">
+      <div>
+        <strong>${html(progress.label)}</strong>
+        <span>${html(progress.detail)}</span>
+      </div>
+      <b>${html(Math.round(progress.percent))}%</b>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" style="width:${Math.max(0, Math.min(100, progress.percent))}%"></div>
+    </div>
+    <div class="record-grid">
+      <span><b>Elapsed</b>${html(formatDuration(elapsed))}</span>
+      <span><b>Files</b>${html(filesScanned)}</span>
+      <span><b>Issues</b>${html(issueCount)}</span>
+      <span><b>Started</b>${html(startedAt)}</span>
+      <span><b>Finished</b>${html(finishedAt)}</span>
+      <span><b>Scan ID</b>${html(scan?.id ?? "--")}</span>
+    </div>
+  `;
+}
+
 function renderFactors(scan) {
   const factors = getHealth(scan)?.factors ?? [];
   elements.factorGrid.innerHTML = "";
@@ -417,8 +516,24 @@ function flattenStack(profile) {
   ];
 }
 
+function getTechnologyGroups(profile) {
+  if (!profile) return [];
+
+  return [
+    ["Languages", profile.languages ?? []],
+    ["Runtimes", profile.runtimes ?? []],
+    ["Frameworks", profile.frameworks ?? []],
+    ["Databases", profile.databases ?? []],
+    ["Build Tools", profile.buildTools ?? []],
+    ["Package Managers", profile.packageManagers ?? []],
+    ["Infrastructure", profile.infrastructure ?? []],
+    ["Unknown", profile.unknown ?? []]
+  ].filter(([, items]) => items.length > 0);
+}
+
 function renderTechnology(scan) {
-  const stack = flattenStack(getScanReport(scan)?.technologyProfile);
+  const profile = getScanReport(scan)?.technologyProfile;
+  const groups = getTechnologyGroups(profile);
   elements.technologyStack.innerHTML = "";
 
   if (isScanPending(scan) && !hasReport(scan)) {
@@ -426,16 +541,29 @@ function renderTechnology(scan) {
     return;
   }
 
-  if (stack.length === 0) {
+  if (groups.length === 0) {
     elements.technologyStack.innerHTML = `<div class="empty">No stack detected</div>`;
     return;
   }
 
-  for (const item of stack) {
-    const chip = document.createElement("span");
-    chip.className = "chip";
-    chip.textContent = item.name;
-    elements.technologyStack.append(chip);
+  for (const [label, items] of groups) {
+    const group = document.createElement("div");
+    group.className = "tech-group";
+    group.innerHTML = `<strong>${html(label)}</strong>`;
+
+    const chips = document.createElement("div");
+    chips.className = "chips";
+
+    for (const item of items) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.title = item.evidence?.join(", ") ?? "";
+      chip.textContent = `${item.name}${item.confidence ? ` ${Math.round(item.confidence * 100)}%` : ""}`;
+      chips.append(chip);
+    }
+
+    group.append(chips);
+    elements.technologyStack.append(group);
   }
 }
 
@@ -708,6 +836,7 @@ function renderAll() {
   renderProjects();
   renderScans();
   renderMetrics(scan);
+  renderScanProgress(scan);
   renderFactors(scan);
   renderTechnology(scan);
   renderSeverity(scan);
