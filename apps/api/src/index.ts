@@ -162,6 +162,13 @@ const artifactStorageDirectory =
     "artifacts"
   );
 
+const uploadStorageDirectory =
+  path.join(
+    repositoryRoot,
+    ".codesentinel-api",
+    "uploads"
+  );
+
 let scanRepository:
   ScanRepository |
   undefined;
@@ -176,6 +183,12 @@ let artifactRepository:
 
 function createScanId(): string {
   return `scan_${Date.now().toString(36)}_${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+}
+
+function createUploadId(): string {
+  return `upload_${Date.now().toString(36)}_${Math.random()
     .toString(36)
     .slice(2, 10)}`;
 }
@@ -690,7 +703,7 @@ function sendJson(
       "access-control-allow-methods":
         "GET,POST,OPTIONS",
       "access-control-allow-headers":
-        "authorization,content-type,x-codesentinel-team"
+        "authorization,content-type,x-codesentinel-filename,x-codesentinel-team"
     }
   );
 
@@ -708,6 +721,16 @@ function sendJson(
 async function readRequestBody(
   request: http.IncomingMessage
 ): Promise<string> {
+  return (
+    await readRequestBuffer(
+      request
+    )
+  ).toString("utf8");
+}
+
+async function readRequestBuffer(
+  request: http.IncomingMessage
+): Promise<Buffer> {
   const chunks: Buffer[] = [];
 
   for await (
@@ -728,8 +751,7 @@ async function readRequestBody(
   return Buffer
     .concat(
       chunks
-    )
-    .toString("utf8");
+    );
 }
 
 async function readJsonRequest<T>(
@@ -749,6 +771,294 @@ async function readJsonRequest<T>(
   return JSON.parse(
     body
   ) as T;
+}
+
+function getHeaderValue(
+  request: http.IncomingMessage,
+  name: string
+): string | undefined {
+  const value =
+    request.headers[name.toLowerCase()];
+
+  return Array.isArray(
+    value
+  )
+    ? value[0]
+    : value;
+}
+
+function sanitizeUploadName(
+  value: string | undefined
+): string {
+  const baseName =
+    path.basename(
+      value ?? "uploaded-project.zip"
+    );
+
+  return baseName
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(
+      0,
+      80
+    ) || "uploaded-project.zip";
+}
+
+function isZipBuffer(
+  body: Buffer
+): boolean {
+  return (
+    body.length >= 4 &&
+    body[0] === 0x50 &&
+    body[1] === 0x4b
+  );
+}
+
+function runProcess(
+  command: string,
+  args: string[]
+): Promise<void> {
+  return new Promise(
+    (
+      resolve,
+      reject
+    ) => {
+      const child =
+        spawn(
+          command,
+          args,
+          {
+            windowsHide:
+              true,
+            stdio:
+              [
+                "ignore",
+                "ignore",
+                "pipe"
+              ]
+          }
+        );
+
+      let stderr =
+        "";
+
+      child.stderr?.on(
+        "data",
+        data => {
+          stderr +=
+            data.toString();
+        }
+      );
+
+      child.on(
+        "error",
+        reject
+      );
+
+      child.on(
+        "close",
+        exitCode => {
+          if (
+            exitCode === 0
+          ) {
+            resolve();
+            return;
+          }
+
+          reject(
+            new Error(
+              stderr.trim() || `${command} exited with code ${exitCode}`
+            )
+          );
+        }
+      );
+    }
+  );
+}
+
+async function extractZipArchive(
+  zipPath: string,
+  destinationPath: string
+): Promise<void> {
+  await fs.mkdir(
+    destinationPath,
+    {
+      recursive:
+        true
+    }
+  );
+
+  if (
+    process.platform === "win32"
+  ) {
+    await runProcess(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force",
+        zipPath,
+        destinationPath
+      ]
+    );
+    return;
+  }
+
+  await runProcess(
+    "unzip",
+    [
+      "-q",
+      zipPath,
+      "-d",
+      destinationPath
+    ]
+  );
+}
+
+async function hasProjectMarker(
+  directoryPath: string
+): Promise<boolean> {
+  const markers = [
+    "package.json",
+    "pyproject.toml",
+    "pom.xml",
+    "build.gradle",
+    "go.mod",
+    "Cargo.toml"
+  ];
+
+  for (
+    const marker
+    of markers
+  ) {
+    if (
+      fsSync.existsSync(
+        path.join(
+          directoryPath,
+          marker
+        )
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function findUploadedProjectRoot(
+  extractedPath: string
+): Promise<string> {
+  if (
+    await hasProjectMarker(
+      extractedPath
+    )
+  ) {
+    return extractedPath;
+  }
+
+  const entries =
+    await fs.readdir(
+      extractedPath,
+      {
+        withFileTypes:
+          true
+      }
+    );
+
+  const directories =
+    entries.filter(
+      entry => entry.isDirectory()
+    );
+
+  for (
+    const directory
+    of directories
+  ) {
+    const candidate =
+      path.join(
+        extractedPath,
+        directory.name
+      );
+
+    if (
+      await hasProjectMarker(
+        candidate
+      )
+    ) {
+      return candidate;
+    }
+  }
+
+  if (
+    directories.length === 1
+  ) {
+    return path.join(
+      extractedPath,
+      directories[0].name
+    );
+  }
+
+  return extractedPath;
+}
+
+async function createUploadedProjectWorkspace(
+  body: Buffer,
+  fileName: string | undefined
+): Promise<string> {
+  await fs.mkdir(
+    uploadStorageDirectory,
+    {
+      recursive:
+        true
+    }
+  );
+
+  const uploadId =
+    createUploadId();
+
+  const uploadDirectory =
+    path.join(
+      uploadStorageDirectory,
+      uploadId
+    );
+
+  const workspaceDirectory =
+    path.join(
+      uploadDirectory,
+      "workspace"
+    );
+
+  await fs.mkdir(
+    uploadDirectory,
+    {
+      recursive:
+        true
+    }
+  );
+
+  const archivePath =
+    path.join(
+      uploadDirectory,
+      sanitizeUploadName(
+        fileName
+      )
+    );
+
+  await fs.writeFile(
+    archivePath,
+    body
+  );
+
+  await extractZipArchive(
+    archivePath,
+    workspaceDirectory
+  );
+
+  return findUploadedProjectRoot(
+    workspaceDirectory
+  );
 }
 
 function resolveProjectPath(
@@ -1330,6 +1640,77 @@ async function createScan(
   );
 }
 
+async function createZipUploadScan(
+  request: http.IncomingMessage
+): Promise<ApiResponse> {
+  const body =
+    await readRequestBuffer(
+      request
+    );
+
+  if (
+    body.length === 0
+  ) {
+    return {
+      status:
+        400,
+      body:
+        {
+          error:
+            "ZIP upload body is empty"
+        }
+    };
+  }
+
+  if (
+    !isZipBuffer(
+      body
+    )
+  ) {
+    return {
+      status:
+        400,
+      body:
+        {
+          error:
+            "Uploaded file is not a ZIP archive"
+        }
+    };
+  }
+
+  try {
+    const projectPath =
+      await createUploadedProjectWorkspace(
+        body,
+        getHeaderValue(
+          request,
+          "x-codesentinel-filename"
+        )
+      );
+
+    return createScanFromBody(
+      request,
+      {
+        projectPath
+      }
+    );
+  } catch (error) {
+    return {
+      status:
+        400,
+      body:
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : String(
+                  error
+                )
+        }
+    };
+  }
+}
+
 async function createScanFromBody(
   request: http.IncomingMessage,
   body: CreateScanRequest
@@ -1782,6 +2163,7 @@ export async function handleApiRequest(
               "GET /projects/:id",
               "GET /projects/:id/scans",
               "POST /scans",
+              "POST /uploads/zip",
               "GET /scans",
               "GET /scans/:id",
               "GET /scans/:id/findings",
@@ -1858,6 +2240,17 @@ export async function handleApiRequest(
     parts.length === 1
   ) {
     return listScans();
+  }
+
+  if (
+    request.method === "POST" &&
+    parts[0] === "uploads" &&
+    parts[1] === "zip" &&
+    parts.length === 2
+  ) {
+    return createZipUploadScan(
+      request
+    );
   }
 
   if (

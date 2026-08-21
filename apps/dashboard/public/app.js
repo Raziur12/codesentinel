@@ -16,6 +16,8 @@ const elements = {
   apiUrl: document.querySelector("#api-url"),
   apiToken: document.querySelector("#api-token"),
   projectPath: document.querySelector("#project-path"),
+  zipFile: document.querySelector("#zip-file"),
+  uploadZip: document.querySelector("#upload-zip"),
   form: document.querySelector("#scan-form"),
   connectionStatus: document.querySelector("#connection-status"),
   connectionHelp: document.querySelector("#connection-help"),
@@ -35,6 +37,8 @@ const elements = {
   aiLabel: document.querySelector("#ai-label"),
   aiList: document.querySelector("#ai-list"),
   fixList: document.querySelector("#fix-list"),
+  featuresLabel: document.querySelector("#features-label"),
+  coreFeatures: document.querySelector("#core-features"),
   trendsLabel: document.querySelector("#trends-label"),
   trendList: document.querySelector("#trend-list")
 };
@@ -129,6 +133,14 @@ function getScanReport(scan) {
   return scan?.report?.scan;
 }
 
+function hasReport(scan) {
+  return Boolean(getScanReport(scan));
+}
+
+function isScanPending(scan) {
+  return ["queued", "running"].includes(scan?.status);
+}
+
 function getFindings(scan) {
   return getScanReport(scan)?.findings ?? [];
 }
@@ -158,6 +170,14 @@ function getHealth(scan) {
 
 function getValidation(scan) {
   return getScanReport(scan)?.summary;
+}
+
+function getValidationReport(scan) {
+  return getScanReport(scan)?.validation;
+}
+
+function getValidationResult(scan, category) {
+  return getValidationReport(scan)?.results?.find(result => result.category === category);
 }
 
 function getProjects() {
@@ -222,6 +242,11 @@ function renderFactors(scan) {
   const factors = getHealth(scan)?.factors ?? [];
   elements.factorGrid.innerHTML = "";
 
+  if (isScanPending(scan) && !hasReport(scan)) {
+    elements.factorGrid.innerHTML = `<div class="empty">Scan is running. Health data will appear when the report is ready.</div>`;
+    return;
+  }
+
   if (factors.length === 0) {
     elements.factorGrid.innerHTML = `<div class="empty">No health data</div>`;
     return;
@@ -256,6 +281,11 @@ function renderTechnology(scan) {
   const stack = flattenStack(getScanReport(scan)?.technologyProfile);
   elements.technologyStack.innerHTML = "";
 
+  if (isScanPending(scan) && !hasReport(scan)) {
+    elements.technologyStack.innerHTML = `<div class="empty">Technology detection is running</div>`;
+    return;
+  }
+
   if (stack.length === 0) {
     elements.technologyStack.innerHTML = `<div class="empty">No stack detected</div>`;
     return;
@@ -270,6 +300,11 @@ function renderTechnology(scan) {
 }
 
 function renderSeverity(scan) {
+  if (isScanPending(scan) && !hasReport(scan)) {
+    elements.severityDistribution.innerHTML = `<div class="empty">Severity will appear after scan completion</div>`;
+    return;
+  }
+
   const counts = {
     critical: 0,
     high: 0,
@@ -303,6 +338,11 @@ function renderFindings(scan) {
   elements.findingsLabel.textContent = `${issues.length} total`;
   elements.findingsList.innerHTML = "";
 
+  if (isScanPending(scan) && !hasReport(scan)) {
+    elements.findingsList.innerHTML = `<div class="empty">Scan is running. Issues will appear when validation finishes.</div>`;
+    return;
+  }
+
   if (issues.length === 0) {
     elements.findingsList.innerHTML = `<div class="empty">No findings active</div>`;
     return;
@@ -329,6 +369,12 @@ function renderAi(scan) {
   elements.aiLabel.textContent = `${analyses.length} explanation(s)`;
   elements.aiList.innerHTML = "";
   elements.fixList.innerHTML = "";
+
+  if (isScanPending(scan) && !hasReport(scan)) {
+    elements.aiList.innerHTML = `<div class="empty">Scan is running. AI analysis starts after validation data is ready.</div>`;
+    elements.fixList.innerHTML = `<div class="empty">Fix suggestions will appear after AI analysis</div>`;
+    return;
+  }
 
   if (analyses.length === 0) {
     elements.aiList.innerHTML = warningCount > 0
@@ -361,6 +407,124 @@ function renderAi(scan) {
       <p>${html(fix.suggestedAction)}</p>
     `;
     elements.fixList.append(item);
+  }
+}
+
+function featureStatus(status, detail) {
+  return {
+    status,
+    detail
+  };
+}
+
+function getFactorStatus(scan, name) {
+  const factor = getHealth(scan)?.factors?.find(item => item.name === name);
+  if (!factor) return undefined;
+  return featureStatus(factor.status, `${factor.score}/${factor.maxScore}`);
+}
+
+function getCommandFeatureStatus(scan, category) {
+  const result = getValidationResult(scan, category);
+  if (!result) return featureStatus("missing", "No command discovered");
+  return featureStatus(result.status, result.command || result.skipReason || result.name);
+}
+
+function getCoreFeatures(scan) {
+  const report = getScanReport(scan);
+  const projectCount = getProjects().length;
+  const stack = flattenStack(report?.technologyProfile);
+  const issues = getIssues(scan);
+  const analyses = report?.aiRootCause?.analyses ?? [];
+  const fixes = report?.aiFixSuggestions?.suggestions ?? [];
+  const securityReport = report?.securityReport;
+  const pending = isScanPending(scan) && !hasReport(scan);
+
+  if (pending) {
+    return [
+      ["Local Workspace", "running", "Scan worker is processing the selected project"],
+      ["Automatic Technology Detection", "running", "Waiting for scanner report"],
+      ["Build Validation", "running", "Waiting for validation results"],
+      ["Security Analysis", "running", "Waiting for security report"],
+      ["Production Readiness Report", "running", "Health score will appear after completion"]
+    ].map(([name, status, detail]) => ({ name, status, detail }));
+  }
+
+  const build = getCommandFeatureStatus(scan, "build");
+  const tests = getCommandFeatureStatus(scan, "test");
+  const lint = getCommandFeatureStatus(scan, "lint");
+  const typeCheck = getCommandFeatureStatus(scan, "type-check");
+  const security = getFactorStatus(scan, "security") ?? featureStatus("missing", "No security factor");
+
+  return [
+    {
+      name: "Multi Repository Support",
+      ...featureStatus(projectCount > 1 ? "active" : "ready", `${projectCount} project record(s)`)
+    },
+    {
+      name: "ZIP Upload",
+      ...featureStatus("ready", "Dashboard upload and API ZIP scan endpoint are wired")
+    },
+    {
+      name: "Local Workspace",
+      ...featureStatus(scan?.projectPath ? "active" : "ready", compactPath(scan?.projectPath))
+    },
+    {
+      name: "GitHub Integration",
+      ...featureStatus("partial", "CI workflow and SARIF upload exist; repository import is not wired yet")
+    },
+    {
+      name: "AI Root Cause Analysis",
+      ...featureStatus(analyses.length > 0 || issues.length === 0 ? "active" : "ready", `${analyses.length} explanation(s), ${fixes.length} fix suggestion(s)`)
+    },
+    {
+      name: "Automatic Technology Detection",
+      ...featureStatus(stack.length > 0 ? "active" : "missing", `${stack.length} stack signal(s)`)
+    },
+    {
+      name: "Build Validation",
+      ...build
+    },
+    {
+      name: "Runtime Validation",
+      ...featureStatus(tests.status === "passed" ? "partial" : "planned", "Runtime smoke checks are not separate yet")
+    },
+    {
+      name: "Security Analysis",
+      ...featureStatus(securityReport ? security.status : "missing", securityReport ? `${securityReport.summary.totalFindings} security finding(s)` : security.detail)
+    },
+    {
+      name: "Performance Analysis",
+      ...featureStatus("planned", "Performance checks are not implemented yet")
+    },
+    {
+      name: "Production Readiness Report",
+      ...featureStatus(getHealth(scan) ? "active" : "missing", getHealth(scan) ? `${getHealth(scan).score}/${getHealth(scan).maxScore} health score` : "No health report")
+    },
+    {
+      name: "Quality Gates",
+      ...featureStatus([build, tests, lint, typeCheck].some(item => item.status === "failed") ? "failed" : "active", `build ${build.status}, test ${tests.status}, lint ${lint.status}, type ${typeCheck.status}`)
+    }
+  ];
+}
+
+function renderCoreFeatures(scan) {
+  const features = getCoreFeatures(scan);
+  const done = features.filter(feature => ["active", "ready", "passed"].includes(feature.status)).length;
+  elements.featuresLabel.textContent = `${done}/${features.length} ready or active`;
+  elements.coreFeatures.innerHTML = "";
+
+  for (const feature of features) {
+    const item = document.createElement("div");
+    item.className = "feature-card";
+    item.dataset.status = feature.status;
+    item.innerHTML = `
+      <div>
+        <strong>${html(feature.name)}</strong>
+        <span>${html(feature.detail)}</span>
+      </div>
+      <b>${html(feature.status)}</b>
+    `;
+    elements.coreFeatures.append(item);
   }
 }
 
@@ -407,6 +571,7 @@ function renderAll() {
   renderSeverity(scan);
   renderFindings(scan);
   renderAi(scan);
+  renderCoreFeatures(scan);
   renderTrends();
   saveState();
 }
@@ -480,6 +645,44 @@ async function createScan(projectPath) {
   }, 1500);
 }
 
+async function createZipUploadScan(file) {
+  let created;
+
+  try {
+    created = await fetchJson("/uploads/zip", {
+      method: "POST",
+      headers: {
+        "content-type": file.type || "application/zip",
+        "x-codesentinel-filename": file.name
+      },
+      body: file
+    });
+  } catch (error) {
+    setConnection(error.message, false);
+    return;
+  }
+
+  state.scans = [
+    created,
+    ...state.scans.filter(scan => scan.id !== created.id)
+  ].slice(0, 20);
+  state.selectedScanId = created.id;
+  renderAll();
+
+  const interval = window.setInterval(async () => {
+    try {
+      await refreshSelectedScan();
+      const scan = getSelectedScan();
+      if (scan && !["queued", "running"].includes(scan.status)) {
+        window.clearInterval(interval);
+      }
+    } catch (error) {
+      setConnection(error.message, false);
+      window.clearInterval(interval);
+    }
+  }, 1500);
+}
+
 elements.form.addEventListener("submit", event => {
   event.preventDefault();
   state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
@@ -493,6 +696,19 @@ elements.refreshScan.addEventListener("click", () => {
   state.apiToken = elements.apiToken.value.trim();
   saveState();
   void loadScans().catch(error => setConnection(error.message, false));
+});
+
+elements.uploadZip.addEventListener("click", () => {
+  const file = elements.zipFile.files?.[0];
+  if (!file) {
+    setConnection("Choose a ZIP file before uploading.", false);
+    return;
+  }
+
+  state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
+  state.apiToken = elements.apiToken.value.trim();
+  saveState();
+  void createZipUploadScan(file);
 });
 
 for (const button of document.querySelectorAll(".nav-item")) {

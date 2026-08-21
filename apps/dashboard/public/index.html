@@ -30,6 +30,10 @@
             <span class="icon">*</span>
             AI
           </button>
+          <button class="nav-item" data-view="features" title="Core Features">
+            <span class="icon">#</span>
+            Features
+          </button>
           <button class="nav-item" data-view="trends" title="Trends">
             <span class="icon">%</span>
             Trends
@@ -56,7 +60,12 @@
               <span>Project Path</span>
               <input id="project-path" type="text" value="." aria-label="Project Path">
             </label>
+            <label class="field">
+              <span>ZIP Upload</span>
+              <input id="zip-file" type="file" accept=".zip,application/zip" aria-label="ZIP Upload">
+            </label>
             <button type="submit">Run Scan</button>
+            <button id="upload-zip" class="secondary" type="button">Upload ZIP</button>
           </form>
         </section>
 
@@ -79,7 +88,7 @@
             <strong id="validation-status">--</strong>
           </article>
           <article class="metric">
-            <span>Findings</span>
+            <span>Issues</span>
             <strong id="finding-count">--</strong>
           </article>
           <article class="metric">
@@ -132,6 +141,14 @@
               <div id="ai-list" class="ai-list"></div>
               <h3>Fix Suggestions</h3>
               <div id="fix-list" class="fix-list"></div>
+            </section>
+
+            <section class="panel features-view view" data-view-panel="features">
+              <div class="panel-header">
+                <h2>Core Features</h2>
+                <span id="features-label"></span>
+              </div>
+              <div id="core-features" class="feature-grid"></div>
             </section>
 
             <section class="panel trends-view view" data-view-panel="trends">
