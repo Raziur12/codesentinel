@@ -8,7 +8,9 @@ function normalizeApiUrl(value) {
 const state = {
   apiUrl: normalizeApiUrl(localStorage.getItem("codesentinel.apiUrl")),
   apiToken: localStorage.getItem("codesentinel.apiToken") ?? "",
+  projects: JSON.parse(localStorage.getItem("codesentinel.projects") ?? "[]"),
   scans: JSON.parse(localStorage.getItem("codesentinel.scans") ?? "[]"),
+  selectedProjectId: localStorage.getItem("codesentinel.selectedProjectId") ?? "",
   selectedScanId: localStorage.getItem("codesentinel.selectedScanId")
 };
 
@@ -16,6 +18,9 @@ const elements = {
   apiUrl: document.querySelector("#api-url"),
   apiToken: document.querySelector("#api-token"),
   projectPath: document.querySelector("#project-path"),
+  projectFiles: document.querySelector("#project-files"),
+  projectFilesName: document.querySelector("#project-files-name"),
+  uploadFiles: document.querySelector("#upload-files"),
   zipFile: document.querySelector("#zip-file"),
   zipFileName: document.querySelector("#zip-file-name"),
   uploadZip: document.querySelector("#upload-zip"),
@@ -23,6 +28,8 @@ const elements = {
   connectionStatus: document.querySelector("#connection-status"),
   connectionHelp: document.querySelector("#connection-help"),
   projectCount: document.querySelector("#project-count"),
+  projectsLabel: document.querySelector("#projects-label"),
+  projectList: document.querySelector("#project-list"),
   scanCount: document.querySelector("#scan-count"),
   scanList: document.querySelector("#scan-list"),
   refreshScan: document.querySelector("#refresh-scan"),
@@ -52,10 +59,19 @@ function saveState() {
   elements.apiUrl.value = state.apiUrl;
   localStorage.setItem("codesentinel.apiUrl", state.apiUrl);
   localStorage.setItem("codesentinel.apiToken", state.apiToken);
+  localStorage.setItem("codesentinel.projects", JSON.stringify(state.projects));
   localStorage.setItem("codesentinel.scans", JSON.stringify(state.scans));
+
+  if (state.selectedProjectId) {
+    localStorage.setItem("codesentinel.selectedProjectId", state.selectedProjectId);
+  } else {
+    localStorage.removeItem("codesentinel.selectedProjectId");
+  }
 
   if (state.selectedScanId) {
     localStorage.setItem("codesentinel.selectedScanId", state.selectedScanId);
+  } else {
+    localStorage.removeItem("codesentinel.selectedScanId");
   }
 }
 
@@ -183,11 +199,22 @@ function getValidationResult(scan, category) {
 }
 
 function getProjects() {
-  return [...new Set(
+  if (state.projects.length > 0) return state.projects;
+
+  return [...new Map(
     state.scans
-      .map(scan => scan.projectPath)
-      .filter(Boolean)
-  )];
+      .filter(scan => scan.projectId || scan.projectPath)
+      .map(scan => [
+        scan.projectId ?? scan.projectPath,
+        {
+          id: scan.projectId ?? scan.projectPath,
+          name: compactPath(scan.projectPath),
+          path: scan.projectPath,
+          lastStatus: scan.status,
+          lastScanId: scan.id
+        }
+      ])
+  ).values()];
 }
 
 function severityClass(severity) {
@@ -218,17 +245,94 @@ function getDisplayStatus(scan) {
   return rawStatus;
 }
 
-function renderScans() {
-  elements.projectCount.textContent = String(getProjects().length);
-  elements.scanCount.textContent = String(state.scans.length);
-  elements.scanList.innerHTML = "";
+function getFileProjectName(files) {
+  const firstFile = files[0];
+  const relativePath = firstFile?.webkitRelativePath;
+  if (relativePath) {
+    return relativePath.split("/")[0];
+  }
 
-  if (state.scans.length === 0) {
-    elements.scanList.innerHTML = `<div class="empty">No scans yet</div>`;
+  const firstName = firstFile?.name ?? "uploaded-project";
+  return firstName.replace(/\.[^.]+$/, "") || "uploaded-project";
+}
+
+function getVisibleScans() {
+  if (!state.selectedProjectId) return state.scans;
+  return state.scans.filter(scan => scan.projectId === state.selectedProjectId);
+}
+
+function getSelectedProject() {
+  return getProjects().find(project => project.id === state.selectedProjectId);
+}
+
+function renderProjects() {
+  const projects = getProjects();
+  const visibleScans = getVisibleScans();
+  elements.projectCount.textContent = String(projects.length);
+  elements.projectsLabel.textContent = `${projects.length} total`;
+  elements.projectList.innerHTML = "";
+
+  const allButton = document.createElement("button");
+  allButton.type = "button";
+  allButton.className = `project-row ${state.selectedProjectId ? "" : "active"}`;
+  allButton.innerHTML = `
+    <strong>All Projects</strong>
+    <span>${html(state.scans.length)} scan(s) across ${html(projects.length)} project(s)</span>
+  `;
+  allButton.addEventListener("click", () => {
+    state.selectedProjectId = "";
+    state.selectedScanId = state.scans[0]?.id;
+    saveState();
+    renderAll();
+  });
+  elements.projectList.append(allButton);
+
+  if (projects.length === 0) {
+    elements.projectList.insertAdjacentHTML("beforeend", `<div class="empty">No projects yet</div>`);
     return;
   }
 
-  for (const scan of state.scans) {
+  for (const project of projects) {
+    const projectScans = state.scans.filter(scan => scan.projectId === project.id);
+    const latestScan = projectScans[0];
+    const status = latestScan ? getDisplayStatus(latestScan) : project.lastStatus ?? "ready";
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `project-row ${project.id === state.selectedProjectId ? "active" : ""}`;
+    row.dataset.status = status;
+    row.innerHTML = `
+      <span class="scan-row-top">
+        <b>${html(status)}</b>
+        <small>${html(projectScans.length)} scan(s)</small>
+      </span>
+      <strong>${html(project.name ?? compactPath(project.path))}</strong>
+      <span>${html(compactPath(project.path))}</span>
+    `;
+    row.addEventListener("click", () => {
+      state.selectedProjectId = project.id;
+      state.selectedScanId = latestScan?.id;
+      saveState();
+      renderAll();
+    });
+    elements.projectList.append(row);
+  }
+
+  if (visibleScans.length === 0 && state.selectedProjectId) {
+    state.selectedScanId = undefined;
+  }
+}
+
+function renderScans() {
+  const visibleScans = getVisibleScans();
+  elements.scanCount.textContent = String(visibleScans.length);
+  elements.scanList.innerHTML = "";
+
+  if (visibleScans.length === 0) {
+    elements.scanList.innerHTML = `<div class="empty">No scans for this project yet</div>`;
+    return;
+  }
+
+  for (const scan of visibleScans) {
     const status = getDisplayStatus(scan);
     const createdAt = scan.createdAt
       ? new Date(scan.createdAt).toLocaleString()
@@ -264,7 +368,10 @@ function renderMetrics(scan) {
   elements.healthScore.textContent = health ? `${health.score}/${health.maxScore}` : "--";
   elements.validationStatus.textContent = status;
   elements.findingCount.textContent = String(issues.length);
-  elements.projectLabel.textContent = compactPath(scan?.projectPath);
+  const selectedProject = getSelectedProject();
+  elements.projectLabel.textContent = selectedProject
+    ? `${selectedProject.name ?? compactPath(selectedProject.path)} / ${compactPath(scan?.projectPath)}`
+    : compactPath(scan?.projectPath);
   elements.healthScore.closest(".metric").dataset.state =
     healthPercent === undefined ? "neutral" : healthPercent >= 80 ? "good" : healthPercent >= 60 ? "warn" : "bad";
   elements.validationStatus.closest(".metric").dataset.state = severityClass(status);
@@ -590,13 +697,15 @@ function renderTrends() {
 }
 
 function getSelectedScan() {
-  return state.scans.find(scan => scan.id === state.selectedScanId) ?? state.scans[0];
+  const visibleScans = getVisibleScans();
+  return visibleScans.find(scan => scan.id === state.selectedScanId) ?? visibleScans[0];
 }
 
 function renderAll() {
   const scan = getSelectedScan();
-  if (scan && !state.selectedScanId) state.selectedScanId = scan.id;
+  if (scan && state.selectedScanId !== scan.id) state.selectedScanId = scan.id;
 
+  renderProjects();
   renderScans();
   renderMetrics(scan);
   renderFactors(scan);
@@ -607,6 +716,18 @@ function renderAll() {
   renderCoreFeatures(scan);
   renderTrends();
   saveState();
+}
+
+async function loadProjects() {
+  const body = await fetchJson("/projects");
+  state.projects = body.projects ?? [];
+
+  if (
+    state.selectedProjectId &&
+    !state.projects.some(project => project.id === state.selectedProjectId)
+  ) {
+    state.selectedProjectId = "";
+  }
 }
 
 async function loadScans() {
@@ -637,6 +758,7 @@ async function refreshSelectedScan() {
     state.scans[index] = scan;
   }
 
+  await loadProjects();
   await loadScans();
   renderAll();
 }
@@ -716,6 +838,53 @@ async function createZipUploadScan(file) {
   }, 1500);
 }
 
+async function createFilesUploadScan(files) {
+  let created;
+  const formData = new FormData();
+  const fileList = Array.from(files);
+
+  for (const file of fileList) {
+    formData.append(
+      "files",
+      file,
+      file.webkitRelativePath || file.name
+    );
+  }
+
+  try {
+    created = await fetchJson("/uploads/files", {
+      method: "POST",
+      headers: {
+        "x-codesentinel-project-name": getFileProjectName(fileList)
+      },
+      body: formData
+    });
+  } catch (error) {
+    setConnection(error.message, false);
+    return;
+  }
+
+  state.scans = [
+    created,
+    ...state.scans.filter(scan => scan.id !== created.id)
+  ].slice(0, 20);
+  state.selectedScanId = created.id;
+  renderAll();
+
+  const interval = window.setInterval(async () => {
+    try {
+      await refreshSelectedScan();
+      const scan = getSelectedScan();
+      if (scan && !["queued", "running"].includes(scan.status)) {
+        window.clearInterval(interval);
+      }
+    } catch (error) {
+      setConnection(error.message, false);
+      window.clearInterval(interval);
+    }
+  }, 1500);
+}
+
 elements.form.addEventListener("submit", event => {
   event.preventDefault();
   state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
@@ -728,7 +897,23 @@ elements.refreshScan.addEventListener("click", () => {
   state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
   state.apiToken = elements.apiToken.value.trim();
   saveState();
-  void loadScans().catch(error => setConnection(error.message, false));
+  void (async () => {
+    await loadProjects();
+    await loadScans();
+  })().catch(error => setConnection(error.message, false));
+});
+
+elements.uploadFiles.addEventListener("click", () => {
+  const files = elements.projectFiles.files;
+  if (!files || files.length === 0) {
+    setConnection("Choose project files before uploading.", false);
+    return;
+  }
+
+  state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
+  state.apiToken = elements.apiToken.value.trim();
+  saveState();
+  void createFilesUploadScan(files);
 });
 
 elements.uploadZip.addEventListener("click", () => {
@@ -742,6 +927,13 @@ elements.uploadZip.addEventListener("click", () => {
   state.apiToken = elements.apiToken.value.trim();
   saveState();
   void createZipUploadScan(file);
+});
+
+elements.projectFiles.addEventListener("change", () => {
+  const files = elements.projectFiles.files;
+  elements.projectFilesName.textContent = files && files.length > 0
+    ? `${files.length} file(s) selected`
+    : "Choose files";
 });
 
 elements.zipFile.addEventListener("change", () => {
@@ -759,6 +951,9 @@ for (const button of document.querySelectorAll(".nav-item")) {
 }
 
 if (await checkApi()) {
-  await loadScans().catch(error => setConnection(error.message, false));
+  await (async () => {
+    await loadProjects();
+    await loadScans();
+  })().catch(error => setConnection(error.message, false));
 }
 renderAll();

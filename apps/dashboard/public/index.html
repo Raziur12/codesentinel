@@ -64,12 +64,18 @@
               </label>
             </div>
             <div class="action-grid">
+              <label class="file-drop" for="project-files">
+                <span>Project Files</span>
+                <strong id="project-files-name">Choose files</strong>
+                <input id="project-files" type="file" multiple aria-label="Project Files Upload">
+              </label>
               <label class="file-drop" for="zip-file">
                 <span>ZIP Upload</span>
                 <strong id="zip-file-name">Choose ZIP</strong>
                 <input id="zip-file" type="file" accept=".zip,application/zip" aria-label="ZIP Upload">
               </label>
               <button type="submit">Run Scan</button>
+              <button id="upload-files" class="secondary" type="button">Upload Files</button>
               <button id="upload-zip" class="secondary" type="button">Upload ZIP</button>
             </div>
           </form>
@@ -104,12 +110,22 @@
         </section>
 
         <section class="layout">
-          <div class="panel scans-panel">
-            <div class="panel-header">
-              <h2>Scans</h2>
-              <button id="refresh-scan" class="ghost" type="button">Refresh</button>
+          <div class="side-stack">
+            <div class="panel projects-panel">
+              <div class="panel-header">
+                <h2>Projects</h2>
+                <span id="projects-label"></span>
+              </div>
+              <div id="project-list" class="project-list"></div>
             </div>
-            <div id="scan-list" class="scan-list"></div>
+
+            <div class="panel scans-panel">
+              <div class="panel-header">
+                <h2>Scans</h2>
+                <button id="refresh-scan" class="ghost" type="button">Refresh</button>
+              </div>
+              <div id="scan-list" class="scan-list"></div>
+            </div>
           </div>
 
           <div class="workspace">

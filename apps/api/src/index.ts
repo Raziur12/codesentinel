@@ -35,6 +35,12 @@ interface CreateProjectRequest {
   path?: string;
 }
 
+interface UploadedFilePart {
+  fieldName: string;
+  fileName: string;
+  body: Buffer;
+}
+
 interface ApiResponse {
   status: number;
   body: unknown;
@@ -703,7 +709,7 @@ function sendJson(
       "access-control-allow-methods":
         "GET,POST,OPTIONS",
       "access-control-allow-headers":
-        "authorization,content-type,x-codesentinel-filename,x-codesentinel-team"
+        "authorization,content-type,x-codesentinel-filename,x-codesentinel-project-name,x-codesentinel-team"
     }
   );
 
@@ -804,6 +810,45 @@ function sanitizeUploadName(
     ) || "uploaded-project.zip";
 }
 
+function sanitizeProjectDirectoryName(
+  value: string | undefined
+): string {
+  return sanitizeUploadName(
+    value ?? "uploaded-project"
+  )
+    .replace(/\.zip$/i, "")
+    .slice(
+      0,
+      64
+    ) || "uploaded-project";
+}
+
+function sanitizeRelativeUploadPath(
+  value: string
+): string {
+  const segments =
+    value
+      .replace(/\\/g, "/")
+      .split("/")
+      .map(
+        segment =>
+          segment
+            .trim()
+            .replace(/[^a-zA-Z0-9._ -]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+      )
+      .filter(
+        segment =>
+          segment.length > 0 &&
+          segment !== "." &&
+          segment !== ".."
+      );
+
+  return segments.join(
+    path.sep
+  );
+}
+
 function isZipBuffer(
   body: Buffer
 ): boolean {
@@ -812,6 +857,157 @@ function isZipBuffer(
     body[0] === 0x50 &&
     body[1] === 0x4b
   );
+}
+
+function parseMultipartFileUploads(
+  body: Buffer,
+  contentType: string | undefined
+): UploadedFilePart[] {
+  const boundaryMatch =
+    contentType?.match(
+      /boundary=(?:"([^"]+)"|([^;]+))/i
+    );
+
+  const boundary =
+    boundaryMatch?.[1] ?? boundaryMatch?.[2];
+
+  if (
+    !boundary
+  ) {
+    throw new Error(
+      "Missing multipart boundary"
+    );
+  }
+
+  const raw =
+    body.toString(
+      "latin1"
+    );
+
+  const boundaryText =
+    `--${boundary}`;
+
+  const parts =
+    raw
+      .split(
+        boundaryText
+      )
+      .slice(
+        1,
+        -1
+      );
+
+  const files: UploadedFilePart[] = [];
+
+  for (
+    const rawPart
+    of parts
+  ) {
+    const part =
+      rawPart.replace(
+        /^\r?\n/,
+        ""
+      );
+
+    const separatorIndex =
+      part.indexOf(
+        "\r\n\r\n"
+      );
+
+    if (
+      separatorIndex === -1
+    ) {
+      continue;
+    }
+
+    const headerText =
+      part.slice(
+        0,
+        separatorIndex
+      );
+
+    let content =
+      part.slice(
+        separatorIndex + 4
+      );
+
+    content =
+      content.replace(
+        /\r?\n$/,
+        ""
+      );
+
+    const headers =
+      Object.fromEntries(
+        headerText
+          .split(
+            /\r?\n/
+          )
+          .map(
+            line => {
+              const index =
+                line.indexOf(
+                  ":"
+                );
+
+              return index === -1
+                ? [
+                    line.toLowerCase(),
+                    ""
+                  ]
+                : [
+                    line
+                      .slice(
+                        0,
+                        index
+                      )
+                      .trim()
+                      .toLowerCase(),
+                    line
+                      .slice(
+                        index + 1
+                      )
+                      .trim()
+                  ];
+            }
+          )
+      );
+
+    const disposition =
+      headers["content-disposition"] ?? "";
+
+    const nameMatch =
+      disposition.match(
+        /name="([^"]+)"/i
+      );
+
+    const fileNameMatch =
+      disposition.match(
+        /filename="([^"]*)"/i
+      );
+
+    const fileName =
+      fileNameMatch?.[1];
+
+    if (
+      !fileName
+    ) {
+      continue;
+    }
+
+    files.push({
+      fieldName:
+        nameMatch?.[1] ?? "files",
+      fileName,
+      body:
+        Buffer.from(
+          content,
+          "latin1"
+        )
+    });
+  }
+
+  return files;
 }
 
 function runProcess(
@@ -1058,6 +1254,109 @@ async function createUploadedProjectWorkspace(
 
   return findUploadedProjectRoot(
     workspaceDirectory
+  );
+}
+
+async function createUploadedFilesWorkspace(
+  files: UploadedFilePart[],
+  projectName: string | undefined
+): Promise<string> {
+  await fs.mkdir(
+    uploadStorageDirectory,
+    {
+      recursive:
+        true
+    }
+  );
+
+  const uploadId =
+    createUploadId();
+
+  const projectDirectory =
+    path.join(
+      uploadStorageDirectory,
+      uploadId,
+      sanitizeProjectDirectoryName(
+        projectName
+      )
+    );
+
+  await fs.mkdir(
+    projectDirectory,
+    {
+      recursive:
+        true
+      }
+  );
+
+  let savedFiles =
+    0;
+
+  for (
+    const file
+    of files
+  ) {
+    const relativePath =
+      sanitizeRelativeUploadPath(
+        file.fileName
+      );
+
+    if (
+      relativePath.length === 0
+    ) {
+      continue;
+    }
+
+    const targetPath =
+      path.resolve(
+        projectDirectory,
+        relativePath
+      );
+
+    const relativeTargetPath =
+      path.relative(
+        projectDirectory,
+        targetPath
+      );
+
+    if (
+      relativeTargetPath.startsWith("..") ||
+      path.isAbsolute(
+        relativeTargetPath
+      )
+    ) {
+      continue;
+    }
+
+    await fs.mkdir(
+      path.dirname(
+        targetPath
+      ),
+      {
+        recursive:
+          true
+      }
+    );
+
+    await fs.writeFile(
+      targetPath,
+      file.body
+    );
+
+    savedFiles +=
+      1;
+  }
+
+  if (
+    savedFiles === 0
+  ) {
+    throw new Error(
+      "No upload files were saved"
+    );
+  }
+
+  return findUploadedProjectRoot(
+    projectDirectory
   );
 }
 
@@ -1711,6 +2010,84 @@ async function createZipUploadScan(
   }
 }
 
+async function createFilesUploadScan(
+  request: http.IncomingMessage
+): Promise<ApiResponse> {
+  const body =
+    await readRequestBuffer(
+      request
+    );
+
+  if (
+    body.length === 0
+  ) {
+    return {
+      status:
+        400,
+      body:
+        {
+          error:
+            "Files upload body is empty"
+        }
+    };
+  }
+
+  try {
+    const files =
+      parseMultipartFileUploads(
+        body,
+        getHeaderValue(
+          request,
+          "content-type"
+        )
+      );
+
+    if (
+      files.length === 0
+    ) {
+      return {
+        status:
+          400,
+        body:
+          {
+            error:
+              "No files found in upload"
+          }
+      };
+    }
+
+    const projectPath =
+      await createUploadedFilesWorkspace(
+        files,
+        getHeaderValue(
+          request,
+          "x-codesentinel-project-name"
+        )
+      );
+
+    return createScanFromBody(
+      request,
+      {
+        projectPath
+      }
+    );
+  } catch (error) {
+    return {
+      status:
+        400,
+      body:
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : String(
+                  error
+                )
+        }
+    };
+  }
+}
+
 async function createScanFromBody(
   request: http.IncomingMessage,
   body: CreateScanRequest
@@ -2163,6 +2540,7 @@ export async function handleApiRequest(
               "GET /projects/:id",
               "GET /projects/:id/scans",
               "POST /scans",
+              "POST /uploads/files",
               "POST /uploads/zip",
               "GET /scans",
               "GET /scans/:id",
@@ -2240,6 +2618,17 @@ export async function handleApiRequest(
     parts.length === 1
   ) {
     return listScans();
+  }
+
+  if (
+    request.method === "POST" &&
+    parts[0] === "uploads" &&
+    parts[1] === "files" &&
+    parts.length === 2
+  ) {
+    return createFilesUploadScan(
+      request
+    );
   }
 
   if (

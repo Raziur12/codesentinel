@@ -210,7 +210,7 @@ h3 {
 }
 
 .action-grid {
-  grid-template-columns: minmax(220px, 1fr) 132px 132px;
+  grid-template-columns: repeat(2, minmax(190px, 1fr)) repeat(3, 128px);
   align-items: end;
 }
 
@@ -368,6 +368,12 @@ button:hover {
   min-height: 560px;
 }
 
+.side-stack {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
 .panel {
   padding: 18px;
 }
@@ -381,6 +387,7 @@ button:hover {
 }
 
 .scan-list,
+.project-list,
 .findings-list,
 .ai-list,
 .fix-list,
@@ -391,12 +398,19 @@ button:hover {
 }
 
 .scan-list {
-  max-height: calc(100vh - 350px);
+  max-height: calc(100vh - 520px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.project-list {
+  max-height: 240px;
   overflow: auto;
   padding-right: 2px;
 }
 
 .scan-row,
+.project-row,
 .finding-row,
 .ai-row,
 .fix-row,
@@ -409,6 +423,7 @@ button:hover {
   background: #ffffff;
 }
 
+.project-row,
 .scan-row {
   display: grid;
   gap: 8px;
@@ -421,12 +436,14 @@ button:hover {
   cursor: pointer;
 }
 
+.project-row:hover,
 .scan-row:hover {
   border-color: var(--accent);
   background: #f8fcff;
   box-shadow: none;
 }
 
+.project-row.active,
 .scan-row.active {
   border-color: var(--accent);
   background: var(--soft);
@@ -456,23 +473,32 @@ button:hover {
   text-align: right;
 }
 
+.project-row[data-status="passed"] .scan-row-top b,
 .scan-row[data-status="passed"] .scan-row-top b {
   background: #d1fae5;
   color: #047857;
 }
 
+.project-row[data-status="ready"] .scan-row-top b,
+.project-row[data-status="running"] .scan-row-top b,
+.project-row[data-status="queued"] .scan-row-top b,
+.project-row[data-status="warning"] .scan-row-top b,
 .scan-row[data-status="running"] .scan-row-top b,
+.scan-row[data-status="warning"] .scan-row-top b,
 .scan-row[data-status="queued"] .scan-row-top b {
   background: #fef3c7;
   color: #92400e;
 }
 
+.project-row[data-status="failed"] .scan-row-top b,
+.project-row[data-status="error"] .scan-row-top b,
 .scan-row[data-status="failed"] .scan-row-top b,
 .scan-row[data-status="error"] .scan-row-top b {
   background: #fee2e2;
   color: #b91c1c;
 }
 
+.project-row strong,
 .scan-row strong,
 .finding-row strong,
 .ai-row strong,
@@ -484,6 +510,7 @@ button:hover {
   margin-bottom: 4px;
 }
 
+.project-row span,
 .scan-row span,
 .finding-row span,
 .ai-row span,
@@ -495,6 +522,8 @@ button:hover {
   font-size: 12px;
 }
 
+.project-row strong,
+.project-row span,
 .scan-row strong,
 .scan-row span {
   overflow-wrap: anywhere;
