@@ -35,6 +35,7 @@ const elements = {
   scanList: document.querySelector("#scan-list"),
   refreshScan: document.querySelector("#refresh-scan"),
   healthScore: document.querySelector("#health-score"),
+  healthNote: document.querySelector("#health-note"),
   validationStatus: document.querySelector("#validation-status"),
   findingCount: document.querySelector("#finding-count"),
   projectLabel: document.querySelector("#project-label"),
@@ -227,6 +228,21 @@ function getHealthPercent(scan) {
   const health = getHealth(scan);
   if (!health?.maxScore) return undefined;
   return Math.round((health.score / health.maxScore) * 100);
+}
+
+function getHealthNote(scan) {
+  const factors = getHealth(scan)?.factors ?? [];
+  if (factors.length === 0) return "";
+
+  const weakFactors = factors.filter(factor => factor.status !== "passed");
+  if (weakFactors.length === 0) return "All readiness checks passed";
+
+  const labels = weakFactors
+    .slice(0, 3)
+    .map(factor => `${factor.label}: ${factor.status}`)
+    .join(", ");
+
+  return `${weakFactors.length} readiness check(s) reduced score: ${labels}`;
 }
 
 function getElapsedSeconds(scan) {
@@ -435,6 +451,7 @@ function renderMetrics(scan) {
   const healthPercent = getHealthPercent(scan);
 
   elements.healthScore.textContent = health ? `${health.score}/${health.maxScore}` : "--";
+  elements.healthNote.textContent = health ? getHealthNote(scan) : "";
   elements.validationStatus.textContent = status;
   elements.findingCount.textContent = String(issues.length);
   const selectedProject = getSelectedProject();
