@@ -24,6 +24,7 @@ const elements = {
   zipFile: document.querySelector("#zip-file"),
   zipFileName: document.querySelector("#zip-file-name"),
   uploadZip: document.querySelector("#upload-zip"),
+  runScan: document.querySelector("#run-scan"),
   form: document.querySelector("#scan-form"),
   connectionStatus: document.querySelector("#connection-status"),
   connectionHelp: document.querySelector("#connection-help"),
@@ -912,6 +913,8 @@ async function createScan(projectPath) {
     created,
     ...state.scans.filter(scan => scan.id !== created.id)
   ].slice(0, 20);
+  await loadProjects().catch(() => undefined);
+  if (created.projectId) state.selectedProjectId = created.projectId;
   state.selectedScanId = created.id;
   renderAll();
 
@@ -950,6 +953,8 @@ async function createZipUploadScan(file) {
     created,
     ...state.scans.filter(scan => scan.id !== created.id)
   ].slice(0, 20);
+  await loadProjects().catch(() => undefined);
+  if (created.projectId) state.selectedProjectId = created.projectId;
   state.selectedScanId = created.id;
   renderAll();
 
@@ -997,6 +1002,8 @@ async function createFilesUploadScan(files) {
     created,
     ...state.scans.filter(scan => scan.id !== created.id)
   ].slice(0, 20);
+  await loadProjects().catch(() => undefined);
+  if (created.projectId) state.selectedProjectId = created.projectId;
   state.selectedScanId = created.id;
   renderAll();
 
@@ -1014,12 +1021,51 @@ async function createFilesUploadScan(files) {
   }, 1500);
 }
 
-elements.form.addEventListener("submit", event => {
-  event.preventDefault();
+function syncConnectionInputs() {
   state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
   state.apiToken = elements.apiToken.value.trim();
   saveState();
+}
+
+function startScanFromSelectedSource() {
+  const files = elements.projectFiles.files;
+  const zipFile = elements.zipFile.files?.[0];
+
+  syncConnectionInputs();
+
+  if (files && files.length > 0) {
+    void createFilesUploadScan(files);
+    return;
+  }
+
+  if (zipFile) {
+    void createZipUploadScan(zipFile);
+    return;
+  }
+
   void createScan(elements.projectPath.value.trim() || ".");
+}
+
+function updatePrimaryActionLabel() {
+  const files = elements.projectFiles.files;
+  const zipFile = elements.zipFile.files?.[0];
+
+  if (files && files.length > 0) {
+    elements.runScan.textContent = "Scan Files";
+    return;
+  }
+
+  if (zipFile) {
+    elements.runScan.textContent = "Scan ZIP";
+    return;
+  }
+
+  elements.runScan.textContent = "Run Scan";
+}
+
+elements.form.addEventListener("submit", event => {
+  event.preventDefault();
+  startScanFromSelectedSource();
 });
 
 elements.refreshScan.addEventListener("click", () => {
@@ -1039,9 +1085,7 @@ elements.uploadFiles.addEventListener("click", () => {
     return;
   }
 
-  state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
-  state.apiToken = elements.apiToken.value.trim();
-  saveState();
+  syncConnectionInputs();
   void createFilesUploadScan(files);
 });
 
@@ -1052,9 +1096,7 @@ elements.uploadZip.addEventListener("click", () => {
     return;
   }
 
-  state.apiUrl = normalizeApiUrl(elements.apiUrl.value);
-  state.apiToken = elements.apiToken.value.trim();
-  saveState();
+  syncConnectionInputs();
   void createZipUploadScan(file);
 });
 
@@ -1063,11 +1105,13 @@ elements.projectFiles.addEventListener("change", () => {
   elements.projectFilesName.textContent = files && files.length > 0
     ? `${files.length} file(s) selected`
     : "Choose files";
+  updatePrimaryActionLabel();
 });
 
 elements.zipFile.addEventListener("change", () => {
   const file = elements.zipFile.files?.[0];
   elements.zipFileName.textContent = file ? file.name : "Choose ZIP";
+  updatePrimaryActionLabel();
 });
 
 for (const button of document.querySelectorAll(".nav-item")) {
