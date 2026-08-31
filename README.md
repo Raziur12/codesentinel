@@ -2,7 +2,7 @@
 
 > AI-Powered Software Validation Platform
 
-![Version](https://img.shields.io/badge/version-v0.0.1-blue)
+![Version](https://img.shields.io/badge/version-v1.0.0-blue)
 ![Status](https://img.shields.io/badge/status-Planning-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
