@@ -9,7 +9,10 @@ const requiredFiles = [
   "public/index.html",
   "public/styles.css",
   "public/app.js",
-  "public/logo.svg"
+  "public/logo.svg",
+  "public/architecture.html",
+  "public/architecture.js",
+  "public/architecture.css"
 ];
 
 for (const file of requiredFiles) {

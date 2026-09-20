@@ -19,9 +19,14 @@ function getContentType(filePath) {
   return contentTypes.get(path.extname(filePath)) ?? "application/octet-stream";
 }
 
+const cleanRoutes = new Map([
+  ["/", "/index.html"],
+  ["/architecture", "/architecture.html"]
+]);
+
 function resolvePublicPath(requestUrl) {
   const url = new URL(requestUrl ?? "/", "http://localhost");
-  const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
+  const pathname = cleanRoutes.get(url.pathname) ?? url.pathname;
   const requestedPath = path.resolve(publicDirectory, `.${pathname}`);
 
   if (!requestedPath.startsWith(publicDirectory)) {

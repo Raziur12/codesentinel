@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CodeSentinel Architecture</title>
+    <link rel="icon" href="/logo.svg">
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/architecture.css">
+  </head>
+  <body class="architecture-page">
+    <header class="arch-topbar">
+      <a class="arch-back" href="/">&larr; Dashboard</a>
+      <div class="arch-title">
+        <img src="/logo.svg" alt="">
+        <div>
+          <strong>CodeSentinel</strong>
+          <span>Architecture</span>
+        </div>
+      </div>
+      <label class="arch-project-picker">
+        <span>Project</span>
+        <select id="arch-project-select"></select>
+      </label>
+      <span id="arch-connection" class="arch-connection"></span>
+    </header>
+
+    <main id="arch-canvas-wrap" class="arch-canvas-wrap">
+      <div id="arch-empty" class="arch-empty">Loading projects&hellip;</div>
+      <div id="arch-canvas" class="arch-canvas hidden"></div>
+    </main>
+
+    <script src="/architecture.js" type="module"></script>
+  </body>
+</html>
