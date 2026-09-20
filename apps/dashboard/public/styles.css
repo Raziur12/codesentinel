@@ -491,6 +491,124 @@ button:hover {
   border-radius: 6px;
   padding: 14px;
   background: #ffffff;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  height: auto;
+  font: inherit;
+  color: inherit;
+}
+
+.factor:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(15, 143, 184, 0.12);
+}
+
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 27, 36, 0.38);
+  z-index: 40;
+}
+
+.factor-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 100vw);
+  background: #ffffff;
+  border-left: 1px solid var(--line);
+  box-shadow: -16px 0 32px -18px rgba(15, 27, 36, 0.35);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.factor-drawer .panel-header {
+  flex: none;
+  align-items: flex-start;
+}
+
+.factor-drawer.hidden {
+  display: none;
+}
+
+.factor-drawer-subtitle {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.factor-drawer-body {
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.factor-drawer-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  background: var(--soft, #f4fbfd);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.factor-drawer-meta div { display: flex; flex-direction: column; gap: 2px; }
+.factor-drawer-meta span:first-child { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; }
+
+.factor-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.factor-table th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line-strong, var(--line));
+}
+
+.factor-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.factor-table tr:last-child td { border-bottom: 0; }
+
+.factor-table .loc,
+.factor-table .cause,
+.mono {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+.factor-table .loc,
+.factor-table .cause {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.factor-evidence-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .project-row,

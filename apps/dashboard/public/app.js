@@ -31,6 +31,12 @@ const elements = {
   form: document.querySelector("#scan-form"),
   connectionStatus: document.querySelector("#connection-status"),
   connectionHelp: document.querySelector("#connection-help"),
+  factorDrawer: document.querySelector("#factor-drawer"),
+  factorDrawerScrim: document.querySelector("#factor-drawer-scrim"),
+  factorDrawerTitle: document.querySelector("#factor-drawer-title"),
+  factorDrawerSubtitle: document.querySelector("#factor-drawer-subtitle"),
+  factorDrawerClose: document.querySelector("#factor-drawer-close"),
+  factorDrawerBody: document.querySelector("#factor-drawer-body"),
   projectCount: document.querySelector("#project-count"),
   projectsLabel: document.querySelector("#projects-label"),
   projectList: document.querySelector("#project-list"),
@@ -514,16 +520,117 @@ function renderFactors(scan) {
   }
 
   for (const factor of factors) {
-    const item = document.createElement("div");
+    const item = document.createElement("button");
+    item.type = "button";
     item.className = "factor";
     item.dataset.status = factor.status;
     item.innerHTML = `
       <strong>${html(factor.label)}</strong>
       <span>${html(factor.status)} - ${html(factor.score)}/${html(factor.maxScore)}</span>
     `;
+    item.addEventListener("click", () => openFactorDrawer(scan, factor));
     elements.factorGrid.append(item);
   }
 }
+
+/**
+ * Maps a health-factor name to the validation/finding category (or
+ * categories) whose findings actually explain it. "configuration" and
+ * "architecture" are computed from project structure rather than from
+ * validation findings, so they have no matching category here - the
+ * drawer falls back to the factor's own evidence text for those.
+ */
+const factorDrawerCategoryMap = {
+  build: ["build"],
+  tests: ["test"],
+  "type-safety": ["type-check"],
+  lint: ["lint"],
+  dependencies: ["dependency"],
+  security: ["security", "secret"],
+  runtime: ["runtime"]
+};
+
+function closeFactorDrawer() {
+  elements.factorDrawer.classList.add("hidden");
+  elements.factorDrawerScrim.classList.add("hidden");
+}
+
+function openFactorDrawer(scan, factor) {
+  const categories = factorDrawerCategoryMap[factor.name] ?? [];
+  const relatedIssues = getIssues(scan).filter(issue => categories.includes(issue.category));
+  const validationResult = categories
+    .map(category => getValidationResult(scan, category))
+    .find(Boolean);
+
+  elements.factorDrawerTitle.textContent = factor.label;
+  elements.factorDrawerSubtitle.textContent = `${factor.status} · ${factor.score}/${factor.maxScore}`;
+
+  const metaHtml = validationResult
+    ? `
+      <div class="factor-drawer-meta">
+        <div><span>Command</span><span class="mono">${html(validationResult.command ?? "--")}</span></div>
+        <div><span>Exit code</span><span>${html(validationResult.exitCode ?? "--")}</span></div>
+        <div><span>Duration</span><span>${html(validationResult.durationMs != null ? `${validationResult.durationMs}ms` : "--")}</span></div>
+        ${validationResult.skipReason ? `<div><span>Skip reason</span><span>${html(validationResult.skipReason)}</span></div>` : ""}
+      </div>
+    `
+    : "";
+
+  const tableHtml = relatedIssues.length > 0
+    ? `
+      <table class="factor-table">
+        <thead>
+          <tr>
+            <th>Severity</th>
+            <th>Reason</th>
+            <th>Cause</th>
+            <th>Location</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${relatedIssues.map(issue => `
+            <tr>
+              <td><strong class="severity-${severityClass(issue.severity)}">${html(issue.severity)}</strong></td>
+              <td>
+                <strong>${html(issue.title)}</strong>
+                <div>${html(issue.message)}</div>
+                ${issue.suggestion ? `<div style="color:var(--muted); margin-top:4px;">Fix: ${html(issue.suggestion)}</div>` : ""}
+              </td>
+              <td class="cause">${html(issue.evidence ?? issue.code ?? "--")}</td>
+              <td class="loc">${html(issue.file ? `${issue.file}${issue.line ? `:${issue.line}` : ""}${issue.column ? `:${issue.column}` : ""}` : "--")}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `
+    : `
+      <p style="margin:0; color:var(--muted); font-size:13px;">
+        ${categories.length > 0
+          ? "No structured findings for this check."
+          : "This check is derived from project structure, not from individual findings."}
+      </p>
+      ${factor.evidence?.length
+        ? `<ul class="factor-evidence-list">${factor.evidence.map(line => `<li>${html(line)}</li>`).join("")}</ul>`
+        : ""}
+    `;
+
+  elements.factorDrawerBody.innerHTML = `
+    <div style="font-size:13px; color:var(--muted);">
+      ${relatedIssues.length} record(s) found for <b>${html(factor.label)}</b>
+    </div>
+    ${metaHtml}
+    ${tableHtml}
+  `;
+
+  elements.factorDrawer.classList.remove("hidden");
+  elements.factorDrawerScrim.classList.remove("hidden");
+}
+
+elements.factorDrawerClose.addEventListener("click", closeFactorDrawer);
+elements.factorDrawerScrim.addEventListener("click", closeFactorDrawer);
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") closeFactorDrawer();
+});
 
 function flattenStack(profile) {
   if (!profile) return [];
