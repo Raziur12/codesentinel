@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import http from "node:http";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
@@ -28,11 +29,23 @@ import type {
 interface CreateScanRequest {
   projectId?: string;
   projectPath?: string;
+  name?: string;
+  groupId?: string;
+  groupLabel?: string;
 }
 
 interface CreateGithubScanRequest {
   repositoryUrl?: string;
   ref?: string;
+}
+
+interface CreateGithubGroupScanRequest {
+  groupLabel?: string;
+  repositories?: Array<{
+    repositoryUrl?: string;
+    ref?: string;
+    label?: string;
+  }>;
 }
 
 interface CreateProjectRequest {
@@ -204,6 +217,12 @@ function createUploadId(): string {
     .slice(2, 10)}`;
 }
 
+function createGroupId(): string {
+  return `group_${Date.now().toString(36)}_${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+}
+
 function normalizeIdentifierValue(
   value: string
 ): string {
@@ -228,14 +247,19 @@ function createProjectId(
       ) || "project"
     ) || "project";
 
+  // A hash of the raw text (rather than a real digest) only reflects
+  // its first few bytes once truncated - two paths sharing a long
+  // common prefix (e.g. every upload under the same
+  // .codesentinel-api/uploads/<id>/workspace root, which also share the
+  // same basename) would otherwise collide onto the same project id.
   const hash =
-    Buffer.from(
-      `${teamId ?? "default"}:${projectPath}`
-    )
-      .toString("base64url")
+    crypto
+      .createHash("sha256")
+      .update(`${teamId ?? "default"}:${projectPath}`)
+      .digest("base64url")
       .slice(
         0,
-        12
+        16
       );
 
   return `project_${base}_${hash}`;
@@ -1988,7 +2012,11 @@ function createScanArtifacts(
 async function upsertProjectFromPath(
   projectPath: string,
   teamId: string | undefined,
-  name: string | undefined
+  name: string | undefined,
+  group?: {
+    groupId: string;
+    groupLabel?: string;
+  }
 ): Promise<ProjectRecord> {
   const repository =
     await getProjectRepository();
@@ -2017,6 +2045,10 @@ async function upsertProjectFromPath(
       name ?? existing?.name ?? path.basename(
         projectPath
       ),
+    groupId:
+      group?.groupId ?? existing?.groupId,
+    groupLabel:
+      group?.groupLabel ?? existing?.groupLabel,
     createdAt:
       existing?.createdAt ?? now,
     updatedAt:
@@ -2351,6 +2383,174 @@ async function createGithubScan(
   }
 }
 
+function sanitizeDisplayLabel(
+  value: string | undefined,
+  fallback: string
+): string {
+  const trimmed =
+    (value ?? "").trim().slice(0, 80);
+
+  return trimmed.length > 0
+    ? trimmed
+    : fallback;
+}
+
+interface GithubGroupScanOutcome {
+  label: string;
+  repositoryUrl: string;
+  ok: boolean;
+  id?: string;
+  projectId?: string;
+  status?: string;
+  projectPath?: string;
+  error?: string;
+}
+
+async function createGithubGroupScan(
+  request: http.IncomingMessage
+): Promise<ApiResponse> {
+  const body =
+    await readJsonRequest<CreateGithubGroupScanRequest>(
+      request
+    );
+
+  const repositories =
+    Array.isArray(body.repositories)
+      ? body.repositories
+      : [];
+
+  if (
+    repositories.length === 0
+  ) {
+    return {
+      status: 400,
+      body: {
+        error: "repositories must be a non-empty array"
+      }
+    };
+  }
+
+  const validatedRepositories: Array<{
+    target: GithubRepositoryTarget;
+    ref: string | undefined;
+    label: string;
+  }> = [];
+
+  for (
+    let index = 0;
+    index < repositories.length;
+    index += 1
+  ) {
+    const entry =
+      repositories[index];
+
+    const validation =
+      validateGithubRepositoryUrl(
+        entry.repositoryUrl
+      );
+
+    if (
+      !validation.ok
+    ) {
+      return {
+        status: 400,
+        body: {
+          error: `repositories[${index}]: ${validation.error}`
+        }
+      };
+    }
+
+    validatedRepositories.push({
+      target: validation.target,
+      ref: sanitizeGitRef(entry.ref),
+      label: sanitizeDisplayLabel(
+        entry.label,
+        validation.target.repo
+      )
+    });
+  }
+
+  const groupId =
+    createGroupId();
+
+  const groupLabel =
+    sanitizeDisplayLabel(
+      body.groupLabel,
+      validatedRepositories
+        .map(repo => repo.label)
+        .join(" + ")
+    );
+
+  const outcomes: GithubGroupScanOutcome[] = [];
+
+  for (
+    const repo
+    of validatedRepositories
+  ) {
+    try {
+      const projectPath =
+        await createGithubProjectWorkspace(
+          repo.target.normalizedUrl,
+          repo.ref
+        );
+
+      const scanResponse =
+        await createScanFromBody(
+          request,
+          {
+            projectPath,
+            name: repo.label,
+            groupId,
+            groupLabel
+          }
+        );
+
+      const scanBody =
+        scanResponse.body as {
+          id?: string;
+          projectId?: string;
+          status?: string;
+          projectPath?: string;
+          error?: string;
+        };
+
+      outcomes.push({
+        label: repo.label,
+        repositoryUrl: repo.target.normalizedUrl,
+        ok: scanResponse.status < 400,
+        id: scanBody.id,
+        projectId: scanBody.projectId,
+        status: scanBody.status,
+        projectPath: scanBody.projectPath,
+        error: scanResponse.status >= 400
+          ? scanBody.error
+          : undefined
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
+      outcomes.push({
+        label: repo.label,
+        repositoryUrl: repo.target.normalizedUrl,
+        ok: false,
+        error: message.slice(0, 2000)
+      });
+    }
+  }
+
+  return {
+    status: 202,
+    body: {
+      groupId,
+      groupLabel,
+      scans: outcomes
+    }
+  };
+}
+
 async function createFilesUploadScan(
   request: http.IncomingMessage
 ): Promise<ApiResponse> {
@@ -2473,7 +2673,13 @@ async function createScanFromBody(
       getTeamId(
         request
       ),
-      undefined
+      body.name,
+      body.groupId
+        ? {
+            groupId: body.groupId,
+            groupLabel: body.groupLabel
+          }
+        : undefined
     );
 
   const record: ScanRecord = {
@@ -2884,6 +3090,7 @@ export async function handleApiRequest(
               "POST /uploads/files",
               "POST /uploads/zip",
               "POST /scans/github",
+              "POST /scans/github/group",
               "GET /scans",
               "GET /scans/:id",
               "GET /scans/:id/findings",
@@ -2980,6 +3187,18 @@ export async function handleApiRequest(
     parts.length === 2
   ) {
     return createZipUploadScan(
+      request
+    );
+  }
+
+  if (
+    request.method === "POST" &&
+    parts[0] === "scans" &&
+    parts[1] === "github" &&
+    parts[2] === "group" &&
+    parts.length === 3
+  ) {
+    return createGithubGroupScan(
       request
     );
   }

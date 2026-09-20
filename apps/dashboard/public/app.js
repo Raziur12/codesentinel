@@ -18,7 +18,9 @@ const elements = {
   apiUrl: document.querySelector("#api-url"),
   apiToken: document.querySelector("#api-token"),
   projectPath: document.querySelector("#project-path"),
-  githubUrl: document.querySelector("#github-url"),
+  githubRepoList: document.querySelector("#github-repo-list"),
+  addGithubRepo: document.querySelector("#add-github-repo"),
+  linkedProjects: document.querySelector("#linked-projects"),
   projectFiles: document.querySelector("#project-files"),
   projectFilesName: document.querySelector("#project-files-name"),
   uploadFiles: document.querySelector("#upload-files"),
@@ -392,6 +394,7 @@ function renderProjects() {
         <small>${html(projectScans.length)} scan(s)</small>
       </span>
       <strong>${html(project.name ?? compactPath(project.path))}</strong>
+      ${project.groupId ? `<span class="group-badge">&#128279; ${html(project.groupLabel ?? "linked")}</span>` : ""}
       <span>${html(compactPath(project.path))}</span>
     `;
     row.addEventListener("click", () => {
@@ -849,11 +852,50 @@ function getSelectedScan() {
   return visibleScans.find(scan => scan.id === state.selectedScanId) ?? visibleScans[0];
 }
 
+function renderLinkedProjects() {
+  if (!elements.linkedProjects) return;
+
+  const project = getSelectedProject();
+  const siblings = project?.groupId
+    ? getProjects().filter(item => item.groupId === project.groupId && item.id !== project.id)
+    : [];
+
+  if (siblings.length === 0) {
+    elements.linkedProjects.innerHTML = "";
+    elements.linkedProjects.classList.add("hidden");
+    return;
+  }
+
+  elements.linkedProjects.classList.remove("hidden");
+  elements.linkedProjects.innerHTML = `
+    <span>Linked (${html(project.groupLabel ?? "group")}):</span>
+    ${siblings
+      .map(
+        sibling =>
+          `<button type="button" class="linked-project-chip" data-project-id="${html(sibling.id)}">${html(
+            sibling.name ?? compactPath(sibling.path)
+          )}</button>`
+      )
+      .join("")}
+  `;
+
+  elements.linkedProjects.querySelectorAll(".linked-project-chip").forEach(button => {
+    button.addEventListener("click", () => {
+      state.selectedProjectId = button.dataset.projectId;
+      const projectScans = state.scans.filter(scan => scan.projectId === state.selectedProjectId);
+      state.selectedScanId = projectScans[0]?.id;
+      saveState();
+      renderAll();
+    });
+  });
+}
+
 function renderAll() {
   const scan = getSelectedScan();
   if (scan && state.selectedScanId !== scan.id) state.selectedScanId = scan.id;
 
   renderProjects();
+  renderLinkedProjects();
   renderScans();
   renderMetrics(scan);
   renderScanProgress(scan);
@@ -991,36 +1033,72 @@ async function createZipUploadScan(file) {
   }, 1500);
 }
 
-async function createGithubScan(repositoryUrl) {
-  let created;
+function setInlineNotice(text, ok = true) {
+  elements.connectionStatus.textContent = text;
+  elements.connectionStatus.style.color = ok ? "#0f9f6e" : "#dc2626";
+  elements.connectionStatus.dataset.status = ok ? "ok" : "error";
+}
+
+/**
+ * Creates one or more linked GitHub-repo scans in a single request (e.g.
+ * a frontend + backend repo that depend on each other). Works for a
+ * single repository too, so the dashboard always uses this one path for
+ * GitHub scans rather than branching on repository count.
+ */
+async function createGithubGroupScan(repositories, groupLabel) {
+  let response;
 
   try {
-    created = await fetchJson("/scans/github", {
+    response = await fetchJson("/scans/github/group", {
       method: "POST",
       headers: {
         "content-type": "application/json"
       },
-      body: JSON.stringify({ repositoryUrl })
+      body: JSON.stringify({ repositories, groupLabel })
     });
   } catch (error) {
     setConnection(error.message, false);
     return;
   }
 
-  state.scans = [
-    created,
-    ...state.scans.filter(scan => scan.id !== created.id)
-  ].slice(0, 20);
+  const outcomes = response.scans ?? [];
+  const succeeded = outcomes.filter(item => item.ok && item.id);
+  const failed = outcomes.filter(item => !item.ok);
+
+  if (failed.length > 0) {
+    setInlineNotice(
+      `${failed.length} of ${outcomes.length} linked repositories failed: ` +
+        failed.map(item => `${item.label} (${item.error ?? "unknown error"})`).join("; "),
+      succeeded.length > 0
+    );
+  }
+
+  if (succeeded.length === 0) {
+    return;
+  }
+
   await loadProjects().catch(() => undefined);
-  if (created.projectId) state.selectedProjectId = created.projectId;
-  state.selectedScanId = created.id;
+  await loadScans().catch(() => undefined);
+
+  state.selectedProjectId = succeeded[0].projectId;
+  state.selectedScanId = succeeded[0].id;
   renderAll();
+
+  const pendingIds = new Set(succeeded.map(item => item.id));
 
   const interval = window.setInterval(async () => {
     try {
-      await refreshSelectedScan();
-      const scan = getSelectedScan();
-      if (scan && !["queued", "running"].includes(scan.status)) {
+      await loadProjects();
+      await loadScans();
+
+      for (const id of Array.from(pendingIds)) {
+        const scan = state.scans.find(item => item.id === id);
+        if (scan && !["queued", "running"].includes(scan.status)) {
+          pendingIds.delete(id);
+        }
+      }
+
+      if (pendingIds.size === 0) {
         window.clearInterval(interval);
       }
     } catch (error) {
@@ -1085,10 +1163,43 @@ function syncConnectionInputs() {
   saveState();
 }
 
+function createGithubRepoRow() {
+  const row = document.createElement("div");
+  row.className = "github-repo-row";
+  row.innerHTML = `
+    <input type="text" class="github-repo-label" placeholder="Label (e.g. Frontend)" aria-label="Repository label">
+    <input type="url" class="github-repo-url" placeholder="https://github.com/owner/repo" aria-label="Repository URL">
+    <button type="button" class="ghost remove-repo-row" aria-label="Remove repository">&times;</button>
+  `;
+
+  row.querySelector(".github-repo-url").addEventListener("input", updatePrimaryActionLabel);
+  row.querySelector(".remove-repo-row").addEventListener("click", () => {
+    row.remove();
+    updatePrimaryActionLabel();
+  });
+
+  return row;
+}
+
+function addGithubRepoRow() {
+  const row = createGithubRepoRow();
+  elements.githubRepoList.append(row);
+  row.querySelector(".github-repo-url").focus();
+}
+
+function getGithubRepositories() {
+  return Array.from(elements.githubRepoList.querySelectorAll(".github-repo-row"))
+    .map(row => ({
+      label: row.querySelector(".github-repo-label").value.trim(),
+      repositoryUrl: row.querySelector(".github-repo-url").value.trim()
+    }))
+    .filter(repo => repo.repositoryUrl.length > 0);
+}
+
 function startScanFromSelectedSource() {
   const files = elements.projectFiles.files;
   const zipFile = elements.zipFile.files?.[0];
-  const githubUrl = elements.githubUrl.value.trim();
+  const githubRepos = getGithubRepositories();
 
   syncConnectionInputs();
 
@@ -1102,8 +1213,11 @@ function startScanFromSelectedSource() {
     return;
   }
 
-  if (githubUrl) {
-    void createGithubScan(githubUrl);
+  if (githubRepos.length > 0) {
+    const groupLabel = githubRepos.length > 1
+      ? githubRepos.map(repo => repo.label || repo.repositoryUrl).join(" + ")
+      : undefined;
+    void createGithubGroupScan(githubRepos, groupLabel);
     return;
   }
 
@@ -1113,7 +1227,7 @@ function startScanFromSelectedSource() {
 function updatePrimaryActionLabel() {
   const files = elements.projectFiles.files;
   const zipFile = elements.zipFile.files?.[0];
-  const githubUrl = elements.githubUrl.value.trim();
+  const githubRepos = getGithubRepositories();
 
   if (files && files.length > 0) {
     elements.runScan.textContent = "Scan Files";
@@ -1125,7 +1239,12 @@ function updatePrimaryActionLabel() {
     return;
   }
 
-  if (githubUrl) {
+  if (githubRepos.length > 1) {
+    elements.runScan.textContent = `Scan ${githubRepos.length} Repos`;
+    return;
+  }
+
+  if (githubRepos.length === 1) {
     elements.runScan.textContent = "Scan GitHub Repo";
     return;
   }
@@ -1184,9 +1303,12 @@ elements.zipFile.addEventListener("change", () => {
   updatePrimaryActionLabel();
 });
 
-elements.githubUrl.addEventListener("input", () => {
+elements.addGithubRepo.addEventListener("click", () => {
+  addGithubRepoRow();
   updatePrimaryActionLabel();
 });
+
+addGithubRepoRow();
 
 for (const button of document.querySelectorAll(".nav-item")) {
   button.addEventListener("click", () => {

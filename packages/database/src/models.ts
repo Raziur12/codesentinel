@@ -28,6 +28,15 @@ export interface ProjectRecord {
   lastScanId?: string;
   lastStatus?: ScanStatus;
   lastHealthScore?: number;
+  /**
+   * Ties this project to sibling projects that were scanned together as
+   * one linked group (e.g. a frontend and backend repo that depend on
+   * each other). Projects in the same group share a groupId; groupLabel
+   * is the human-readable name for the group, duplicated onto every
+   * member so no separate group collection/lookup is needed.
+   */
+  groupId?: string;
+  groupLabel?: string;
   createdAt: string;
   updatedAt: string;
 }

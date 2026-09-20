@@ -62,10 +62,11 @@
                 <span>Project Path</span>
                 <input id="project-path" type="text" value="." aria-label="Project Path">
               </label>
-              <label class="field">
-                <span>GitHub Repository URL</span>
-                <input id="github-url" type="url" placeholder="https://github.com/owner/repo" aria-label="GitHub Repository URL">
-              </label>
+            </div>
+            <div class="field github-repos-field">
+              <span>GitHub Repositories (add more than one to scan linked repos, e.g. frontend + backend, as one group)</span>
+              <div id="github-repo-list" class="github-repo-list"></div>
+              <button type="button" id="add-github-repo" class="ghost add-repo-row">+ Add repository</button>
             </div>
             <div class="action-grid">
               <label class="file-drop" for="project-files">
@@ -139,6 +140,7 @@
                 <h2>Project</h2>
                 <span id="project-label"></span>
               </div>
+              <div id="linked-projects" class="linked-projects hidden"></div>
               <div id="scan-progress" class="scan-progress"></div>
               <div class="status-grid" id="factor-grid"></div>
               <div class="split">
