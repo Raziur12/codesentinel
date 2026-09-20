@@ -60,7 +60,9 @@ const elements = {
   featuresLabel: document.querySelector("#features-label"),
   coreFeatures: document.querySelector("#core-features"),
   trendsLabel: document.querySelector("#trends-label"),
-  trendList: document.querySelector("#trend-list")
+  trendList: document.querySelector("#trend-list"),
+  fixesLabel: document.querySelector("#fixes-label"),
+  fixesList: document.querySelector("#fixes-list")
 };
 
 elements.apiUrl.value = state.apiUrl;
@@ -954,6 +956,69 @@ function renderTrends() {
   }
 }
 
+/**
+ * "Fixes" panel: once a scan's report is ready (100%), lists every
+ * active finding/warning with the fix it needs and the exact command
+ * that re-validates that category, so the two views stay honest with
+ * each other - this never fabricates a command, it reads the same
+ * validation.results[].command every other panel reads.
+ */
+function renderFixesPanel(scan) {
+  if (isScanPending(scan) && !hasReport(scan)) {
+    elements.fixesLabel.textContent = "";
+    elements.fixesList.innerHTML = `<div class="empty">Scan is running. Fixes will appear once the report is ready.</div>`;
+    return;
+  }
+
+  if (!hasReport(scan)) {
+    elements.fixesLabel.textContent = "";
+    elements.fixesList.innerHTML = `<div class="empty">Select a completed scan to see its fixes.</div>`;
+    return;
+  }
+
+  const issues = getIssues(scan);
+  elements.fixesLabel.textContent = `${issues.length} fix(es) needed`;
+
+  if (issues.length === 0) {
+    elements.fixesList.innerHTML = `<div class="empty">No active findings - nothing to fix.</div>`;
+    return;
+  }
+
+  const rows = issues.map(issue => {
+    const validationResult = getValidationResult(scan, issue.category);
+    const command = validationResult?.command;
+    const location = issue.file
+      ? `${issue.file}${issue.line ? `:${issue.line}` : ""}${issue.column ? `:${issue.column}` : ""}`
+      : "--";
+
+    return `
+      <tr>
+        <td><strong class="severity-${severityClass(issue.severity)}">${html(issue.severity)}</strong></td>
+        <td class="loc">${html(location)}</td>
+        <td>
+          <strong>${html(issue.title)}</strong>
+          <div>${html(issue.suggestion ?? issue.message)}</div>
+        </td>
+        <td class="cause">${command ? html(command) : "No re-run command for this check"}</td>
+      </tr>
+    `;
+  }).join("");
+
+  elements.fixesList.innerHTML = `
+    <table class="factor-table">
+      <thead>
+        <tr>
+          <th>Severity</th>
+          <th>Location</th>
+          <th>Fix Needed</th>
+          <th>Run After Fixing</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
 function getSelectedScan() {
   const visibleScans = getVisibleScans();
   return visibleScans.find(scan => scan.id === state.selectedScanId) ?? visibleScans[0];
@@ -1013,6 +1078,7 @@ function renderAll() {
   renderAi(scan);
   renderCoreFeatures(scan);
   renderTrends();
+  renderFixesPanel(scan);
   saveState();
 }
 
