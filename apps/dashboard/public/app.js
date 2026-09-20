@@ -62,7 +62,9 @@ const elements = {
   trendsLabel: document.querySelector("#trends-label"),
   trendList: document.querySelector("#trend-list"),
   fixesLabel: document.querySelector("#fixes-label"),
-  fixesList: document.querySelector("#fixes-list")
+  fixesList: document.querySelector("#fixes-list"),
+  architectureLabel: document.querySelector("#architecture-label"),
+  architectureBody: document.querySelector("#architecture-body")
 };
 
 elements.apiUrl.value = state.apiUrl;
@@ -1019,6 +1021,137 @@ function renderFixesPanel(scan) {
   `;
 }
 
+function getLatestScanForProject(projectId) {
+  return state.scans.find(item => item.projectId === projectId);
+}
+
+function describeStructureList(list) {
+  return list && list.length > 0 ? list.join(", ") : "none detected";
+}
+
+/**
+ * Builds a plain-language description of how a linked frontend/backend
+ * pair (or a single project) fits together, using only the structural
+ * booleans project-analyzer already computes (project.structure.frontend
+ * / .backend) - never guesses beyond that evidence.
+ */
+function generateArchitectureNarrative(cards) {
+  if (cards.length === 0) {
+    return "No structural data available yet.";
+  }
+
+  if (cards.length > 1) {
+    const frontendCard = cards.find(c => c.structure?.frontend && !c.structure?.backend) ?? cards.find(c => c.structure?.frontend);
+    const backendCard = cards.find(c => c !== frontendCard && c.structure?.backend);
+
+    if (frontendCard && backendCard) {
+      return `This is a linked system scanned as ${cards.length} separate repositories under the group "${html(cards[0].project.groupLabel ?? "linked group")}". `
+        + `<b>${html(frontendCard.project.name ?? "one repository")}</b> contains the frontend (evidence: frontend structure detected in that scan), `
+        + `and <b>${html(backendCard.project.name ?? "the other repository")}</b> contains the backend (evidence: backend structure detected in that scan). `
+        + `Review each repository's card below for its own tech stack and folders.`;
+    }
+
+    return `${cards.length} linked repositories were found under the group "${html(cards[0].project.groupLabel ?? "linked group")}", `
+      + `but a clear frontend/backend split could not be determined from their structure - see each card's own signals below.`;
+  }
+
+  const only = cards[0];
+  if (only.structure?.frontend && only.structure?.backend) {
+    return `<b>${html(only.project.name ?? "This repository")}</b> contains both frontend and backend structure in the same repository (a full-stack/monorepo layout).`;
+  }
+  if (only.structure?.frontend) {
+    return `<b>${html(only.project.name ?? "This repository")}</b> appears to be frontend-only - no backend structure was detected. Link a backend repository (via GitHub Integration) to see them together here.`;
+  }
+  if (only.structure?.backend) {
+    return `<b>${html(only.project.name ?? "This repository")}</b> appears to be backend-only - no frontend structure was detected. Link a frontend repository (via GitHub Integration) to see them together here.`;
+  }
+  return `Frontend/backend role could not be clearly determined for <b>${html(only.project.name ?? "this repository")}</b> from its structure.`;
+}
+
+function renderArchitectureProjectCard(project, scan) {
+  const report = getScanReport(scan);
+  const structure = report?.project?.structure;
+  const groups = getTechnologyGroups(report?.technologyProfile);
+
+  const roleTags = [];
+  if (structure?.frontend) roleTags.push("Frontend");
+  if (structure?.backend) roleTags.push("Backend");
+  if (structure?.tests) roleTags.push("Tests");
+
+  const chipsHtml = groups.length > 0
+    ? groups.map(([label, items]) => `
+        <div class="tech-group">
+          <strong>${html(label)}</strong>
+          <div class="chips">
+            ${items.map(item => `<span class="chip" title="${html(item.evidence?.join(", ") ?? "")}">${html(item.name)}</span>`).join("")}
+          </div>
+        </div>
+      `).join("")
+    : `<div class="empty">No technology stack detected</div>`;
+
+  return `
+    <div class="arch-card">
+      <div class="arch-card-top">
+        <strong>${html(project.name ?? compactPath(project.path))}</strong>
+        <span class="chip">${html(roleTags.length > 0 ? roleTags.join(" + ") : "role unclear")}</span>
+      </div>
+      <div class="arch-card-path">${html(compactPath(project.path))}</div>
+      ${chipsHtml}
+      <div class="arch-card-structure">
+        <div><b>Root files</b>${html(describeStructureList(structure?.rootFiles))}</div>
+        <div><b>Directories</b>${html(describeStructureList(structure?.directories))}</div>
+        <div><b>Configuration</b>${html(describeStructureList(structure?.configuration))}</div>
+        <div><b>Package files</b>${html(describeStructureList(structure?.packageFiles))}</div>
+        <div><b>Infrastructure</b>${html(describeStructureList(structure?.infrastructure))}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderArchitecturePanel(scan) {
+  if (isScanPending(scan) && !hasReport(scan)) {
+    elements.architectureLabel.textContent = "";
+    elements.architectureBody.innerHTML = `<div class="empty">Scan is running. Architecture data will appear once the report is ready.</div>`;
+    return;
+  }
+
+  if (!hasReport(scan)) {
+    elements.architectureLabel.textContent = "";
+    elements.architectureBody.innerHTML = `<div class="empty">Select a completed scan to see its architecture.</div>`;
+    return;
+  }
+
+  const project = getSelectedProject() ?? getProjects().find(item => item.id === scan.projectId);
+  const linkedProjects = project?.groupId
+    ? getProjects().filter(item => item.groupId === project.groupId)
+    : project
+      ? [project]
+      : [];
+
+  const cards = linkedProjects
+    .map(linkedProject => {
+      const projectScan = linkedProject.id === scan.projectId ? scan : getLatestScanForProject(linkedProject.id);
+      return {
+        project: linkedProject,
+        scan: projectScan,
+        structure: getScanReport(projectScan)?.project?.structure
+      };
+    })
+    .filter(card => card.scan);
+
+  elements.architectureLabel.textContent = `${cards.length} repositor${cards.length === 1 ? "y" : "ies"}`;
+
+  if (cards.length === 0) {
+    elements.architectureBody.innerHTML = `<div class="empty">No structural data available for this project yet.</div>`;
+    return;
+  }
+
+  elements.architectureBody.innerHTML = `
+    <div class="arch-narrative">${generateArchitectureNarrative(cards)}</div>
+    <div class="arch-grid">${cards.map(card => renderArchitectureProjectCard(card.project, card.scan)).join("")}</div>
+  `;
+}
+
 function getSelectedScan() {
   const visibleScans = getVisibleScans();
   return visibleScans.find(scan => scan.id === state.selectedScanId) ?? visibleScans[0];
@@ -1079,6 +1212,7 @@ function renderAll() {
   renderCoreFeatures(scan);
   renderTrends();
   renderFixesPanel(scan);
+  renderArchitecturePanel(scan);
   saveState();
 }
 
