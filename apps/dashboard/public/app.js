@@ -18,6 +18,7 @@ const elements = {
   apiUrl: document.querySelector("#api-url"),
   apiToken: document.querySelector("#api-token"),
   projectPath: document.querySelector("#project-path"),
+  githubUrl: document.querySelector("#github-url"),
   projectFiles: document.querySelector("#project-files"),
   projectFilesName: document.querySelector("#project-files-name"),
   uploadFiles: document.querySelector("#upload-files"),
@@ -739,6 +740,7 @@ function getCoreFeatures(scan) {
   const tests = getCommandFeatureStatus(scan, "test");
   const lint = getCommandFeatureStatus(scan, "lint");
   const typeCheck = getCommandFeatureStatus(scan, "type-check");
+  const runtime = getCommandFeatureStatus(scan, "runtime");
   const security = getFactorStatus(scan, "security") ?? featureStatus("missing", "No security factor");
 
   return [
@@ -756,7 +758,7 @@ function getCoreFeatures(scan) {
     },
     {
       name: "GitHub Integration",
-      ...featureStatus("partial", "CI workflow and SARIF upload exist; repository import is not wired yet")
+      ...featureStatus("ready", "Repository URL clone and scan is wired via POST /scans/github")
     },
     {
       name: "AI Root Cause Analysis",
@@ -772,7 +774,7 @@ function getCoreFeatures(scan) {
     },
     {
       name: "Runtime Validation",
-      ...featureStatus(tests.status === "passed" ? "partial" : "planned", "Runtime smoke checks are not separate yet")
+      ...runtime
     },
     {
       name: "Security Analysis",
@@ -989,6 +991,45 @@ async function createZipUploadScan(file) {
   }, 1500);
 }
 
+async function createGithubScan(repositoryUrl) {
+  let created;
+
+  try {
+    created = await fetchJson("/scans/github", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ repositoryUrl })
+    });
+  } catch (error) {
+    setConnection(error.message, false);
+    return;
+  }
+
+  state.scans = [
+    created,
+    ...state.scans.filter(scan => scan.id !== created.id)
+  ].slice(0, 20);
+  await loadProjects().catch(() => undefined);
+  if (created.projectId) state.selectedProjectId = created.projectId;
+  state.selectedScanId = created.id;
+  renderAll();
+
+  const interval = window.setInterval(async () => {
+    try {
+      await refreshSelectedScan();
+      const scan = getSelectedScan();
+      if (scan && !["queued", "running"].includes(scan.status)) {
+        window.clearInterval(interval);
+      }
+    } catch (error) {
+      setConnection(error.message, false);
+      window.clearInterval(interval);
+    }
+  }, 1500);
+}
+
 async function createFilesUploadScan(files) {
   let created;
   const formData = new FormData();
@@ -1047,6 +1088,7 @@ function syncConnectionInputs() {
 function startScanFromSelectedSource() {
   const files = elements.projectFiles.files;
   const zipFile = elements.zipFile.files?.[0];
+  const githubUrl = elements.githubUrl.value.trim();
 
   syncConnectionInputs();
 
@@ -1060,12 +1102,18 @@ function startScanFromSelectedSource() {
     return;
   }
 
+  if (githubUrl) {
+    void createGithubScan(githubUrl);
+    return;
+  }
+
   void createScan(elements.projectPath.value.trim() || ".");
 }
 
 function updatePrimaryActionLabel() {
   const files = elements.projectFiles.files;
   const zipFile = elements.zipFile.files?.[0];
+  const githubUrl = elements.githubUrl.value.trim();
 
   if (files && files.length > 0) {
     elements.runScan.textContent = "Scan Files";
@@ -1074,6 +1122,11 @@ function updatePrimaryActionLabel() {
 
   if (zipFile) {
     elements.runScan.textContent = "Scan ZIP";
+    return;
+  }
+
+  if (githubUrl) {
+    elements.runScan.textContent = "Scan GitHub Repo";
     return;
   }
 
@@ -1128,6 +1181,10 @@ elements.projectFiles.addEventListener("change", () => {
 elements.zipFile.addEventListener("change", () => {
   const file = elements.zipFile.files?.[0];
   elements.zipFileName.textContent = file ? file.name : "Choose ZIP";
+  updatePrimaryActionLabel();
+});
+
+elements.githubUrl.addEventListener("input", () => {
   updatePrimaryActionLabel();
 });
 

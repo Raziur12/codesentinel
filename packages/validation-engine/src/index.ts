@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
+import net from "node:net";
 import path from "node:path";
 
 import {
@@ -46,7 +47,8 @@ export type ValidationCategory =
   | "engine"
   | "security"
   | "secret"
-  | "configuration";
+  | "configuration"
+  | "runtime";
 
 export interface CodeSentinelValidationConfig {
   build?: boolean;
@@ -60,6 +62,8 @@ export interface CodeSentinelValidationConfig {
   security?: boolean;
 
   secrets?: boolean;
+
+  runtime?: boolean;
 }
 
 export interface CodeSentinelConfig {
@@ -257,6 +261,20 @@ interface LintDetectionInfo {
   tools: LintToolInfo[];
 
   hasLintScript: boolean;
+
+  skipReason?: string;
+}
+
+interface RuntimeStartInfo {
+  hasStartScript: boolean;
+
+  scriptName?: "start" | "dev";
+
+  port: number;
+
+  confidence: number;
+
+  evidence: string[];
 
   skipReason?: string;
 }
@@ -927,6 +945,9 @@ function isValidationCategoryEnabled(
 
     case "secret":
       return validation.secrets !== false;
+
+    case "runtime":
+      return validation.runtime !== false;
 
     default:
       return true;
@@ -1993,6 +2014,95 @@ function detectLintTools(
   };
 }
 
+function detectRuntimeStartCommand(
+  files: string[],
+  packageJson: PackageJson | null
+): RuntimeStartInfo {
+  const scripts =
+    packageJson?.scripts;
+
+  const scriptName: "start" | "dev" | undefined =
+    scripts?.start
+      ? "start"
+      : scripts?.dev
+        ? "dev"
+        : undefined;
+
+  if (
+    !scriptName
+  ) {
+    return {
+      hasStartScript: false,
+      port: 3000,
+      confidence: 0,
+      evidence: [],
+      skipReason: "No start or dev script found"
+    };
+  }
+
+  const scriptSource =
+    scripts?.[scriptName] ?? "";
+
+  const evidence: string[] = [
+    `${scriptName} script found`
+  ];
+
+  let port = 3000;
+  let confidence = 0.3;
+
+  if (
+    /vite\s+preview/i.test(scriptSource)
+  ) {
+    port = 4173;
+    confidence = 0.7;
+    evidence.push("vite preview detected, defaulting to port 4173");
+  } else if (
+    /\bvite\b/i.test(scriptSource)
+  ) {
+    port = 5173;
+    confidence = 0.7;
+    evidence.push("vite dev server detected, defaulting to port 5173");
+  } else if (
+    /next\s+(start|dev)/i.test(scriptSource)
+  ) {
+    port = 3000;
+    confidence = 0.7;
+    evidence.push("next start/dev detected, defaulting to port 3000");
+  } else {
+    evidence.push("no known framework CLI detected, defaulting to port 3000");
+  }
+
+  const explicitPortMatch =
+    /--port[= ](\d{2,5})|-p[= ](\d{2,5})/i.exec(scriptSource);
+
+  if (
+    explicitPortMatch
+  ) {
+    port = Number(explicitPortMatch[1] ?? explicitPortMatch[2]);
+    confidence = 0.9;
+    evidence.push(`explicit port flag found in script, using port ${port}`);
+  } else if (
+    /process\.env\.PORT/i.test(scriptSource)
+  ) {
+    evidence.push("script references process.env.PORT (cannot be resolved statically, defaulting to 3000)");
+  } else if (
+    hasConfigFile(
+      files,
+      /^(vite|next)\.config\.(ts|js|mts|mjs|cts|cjs)$/i
+    )
+  ) {
+    evidence.push("framework config file present, using framework default port");
+  }
+
+  return {
+    hasStartScript: true,
+    scriptName,
+    port,
+    confidence,
+    evidence
+  };
+}
+
 async function createScriptCommand(
   name: string,
   category: ValidationCategory,
@@ -2078,6 +2188,34 @@ function createBuildCommand(
         buildSystem.confidence,
       evidence:
         buildSystem.evidence
+    }
+  );
+}
+
+function createRuntimeCommand(
+  packageManager: string,
+  packageManagerCommands: PackageManagerCommands,
+  runtimeStart: RuntimeStartInfo
+): ValidationCommand {
+  return createCommand(
+    "Runtime",
+    "runtime",
+    80,
+    packageManager,
+    packageManagerCommands.run(
+      runtimeStart.scriptName ?? "start"
+    ),
+    runtimeStart.hasStartScript,
+    runtimeStart.hasStartScript
+      ? undefined
+      : runtimeStart.skipReason ?? "No start or dev script found",
+    {
+      port:
+        runtimeStart.port,
+      confidence:
+        runtimeStart.confidence,
+      evidence:
+        runtimeStart.evidence
     }
   );
 }
@@ -2450,6 +2588,12 @@ export async function discoverValidationPlan(
       packageJson
     );
 
+  const runtimeStart =
+    detectRuntimeStartCommand(
+      projectFiles,
+      packageJson
+    );
+
   const installCommand =
     packageJson
       ? createCommand(
@@ -2526,7 +2670,12 @@ export async function discoverValidationPlan(
           packageManager,
           packageJson
         ),
-        createSecretScanCommand()
+        createSecretScanCommand(),
+        createRuntimeCommand(
+          packageManager,
+          packageManagerCommands,
+          runtimeStart
+        )
       ],
       configuration
     );
@@ -3734,6 +3883,323 @@ function createSkippedResult(
   };
 }
 
+const runtimeSmokeTestBudgetMs = 10_000;
+const runtimeSmokeTestPollIntervalMs = 500;
+const runtimeSmokeTestKillGraceMs = 3_000;
+
+/**
+ * Check whether a TCP port is reachable on localhost.
+ *
+ * Used instead of an HTTP GET so non-HTTP servers
+ * (raw TCP, WebSocket-only, etc.) still count as reachable.
+ */
+function isPortReachable(
+  port: number
+): Promise<boolean> {
+  return new Promise(
+    resolve => {
+      const socket =
+        net.connect({
+          port,
+          host: "127.0.0.1"
+        });
+
+      const finish = (reachable: boolean) => {
+        socket.removeAllListeners();
+        socket.destroy();
+        resolve(reachable);
+      };
+
+      socket.once("connect", () => finish(true));
+      socket.once("error", () => finish(false));
+      socket.setTimeout(
+        runtimeSmokeTestPollIntervalMs,
+        () => finish(false)
+      );
+    }
+  );
+}
+
+/**
+ * Start the project's start/dev command and check whether it
+ * becomes reachable on its expected port within a fixed budget.
+ *
+ * Unlike every other validation command, success here means the
+ * process is still running and reachable, not that it exited 0 -
+ * a runtime smoke test that "passes" by exiting would indicate the
+ * server crashed or never started listening. The process is always
+ * killed before the result resolves so no server is left running.
+ */
+function runRuntimeSmokeTest(
+  projectPath: string,
+  validationCommand: ValidationCommand
+): Promise<ValidationResult> {
+  return new Promise(
+    resolve => {
+      const started =
+        Date.now();
+
+      const isWindows =
+        process.platform === "win32";
+
+      const windowsCmdExecutables =
+        new Set([
+          "npm",
+          "npx",
+          "yarn",
+          "pnpm"
+        ]);
+
+      const executable =
+        isWindows &&
+        windowsCmdExecutables.has(
+          validationCommand.command
+        )
+          ? `${validationCommand.command}.cmd`
+          : validationCommand.command;
+
+      const port =
+        Number(
+          validationCommand.metadata?.port
+        ) || 3000;
+
+      const child =
+        spawn(
+          executable,
+          validationCommand.args,
+          {
+            cwd: projectPath,
+            shell: isWindows,
+            windowsHide: true,
+            // On POSIX, isolate the child in its own process group so the
+            // whole tree (e.g. "npm run start" -> the real server process)
+            // can be killed together via a negative PID signal below.
+            detached: !isWindows,
+            stdio: ["ignore", "pipe", "pipe"]
+          }
+        );
+
+      let stdout = "";
+      let stderr = "";
+      let settled = false;
+      let pollHandle: ReturnType<typeof setInterval> | undefined;
+      let budgetHandle: ReturnType<typeof setTimeout> | undefined;
+
+      child.stdout?.on(
+        "data",
+        data => {
+          stdout += data.toString();
+        }
+      );
+
+      child.stderr?.on(
+        "data",
+        data => {
+          stderr += data.toString();
+        }
+      );
+
+      /**
+       * Kill the entire process tree, not just the immediate child.
+       *
+       * "npm run start"/"npm run dev" is itself a wrapper that spawns the
+       * real server process (and, on Windows with shell:true, an extra
+       * cmd.exe layer on top of that). Killing only the immediate child
+       * leaves the actual server orphaned, still bound to its port, and
+       * still holding the stdout/stderr pipes open - which would keep
+       * this scanner process's event loop alive indefinitely. On Windows
+       * this uses `taskkill /T /F` to terminate the whole tree; on POSIX
+       * it signals the negative PID (the process group created by
+       * `detached: true` above).
+       */
+      function killProcessTree(): void {
+        if (
+          isWindows
+        ) {
+          if (
+            child.pid
+          ) {
+            spawn(
+              "taskkill",
+              ["/pid", String(child.pid), "/T", "/F"],
+              {
+                windowsHide: true,
+                stdio: "ignore"
+              }
+            );
+          }
+
+          return;
+        }
+
+        try {
+          if (
+            child.pid
+          ) {
+            process.kill(-child.pid, "SIGTERM");
+          }
+        } catch {
+          // process group may already be gone; ignore.
+        }
+
+        setTimeout(
+          () => {
+            try {
+              if (
+                child.pid
+              ) {
+                process.kill(-child.pid, "SIGKILL");
+              }
+            } catch {
+              // process group may already be gone; ignore.
+            }
+          },
+          runtimeSmokeTestKillGraceMs
+        );
+      }
+
+      const finish = (
+        result: ValidationResult
+      ) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+
+        if (pollHandle) {
+          clearInterval(pollHandle);
+        }
+
+        if (budgetHandle) {
+          clearTimeout(budgetHandle);
+        }
+
+        killProcessTree();
+
+        // Detach from stdio regardless of whether the underlying process
+        // tree has fully exited yet, so this scanner's own event loop is
+        // never blocked waiting on pipes an orphaned descendant might
+        // still be holding open.
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+
+        resolve(result);
+      };
+
+      child.on(
+        "error",
+        error => {
+          const errorOutput =
+            `${stderr}\n${error.message}`;
+
+          finish({
+            name: validationCommand.name,
+            command: getCommandText(validationCommand),
+            status: "failed",
+            category: validationCommand.category,
+            exitCode: null,
+            stdout,
+            stderr: errorOutput,
+            durationMs: Date.now() - started,
+            findings: createFailureFindings(
+              validationCommand,
+              null,
+              stdout,
+              errorOutput
+            ),
+            warnings: []
+          });
+        }
+      );
+
+      child.on(
+        "close",
+        exitCode => {
+          finish({
+            name: validationCommand.name,
+            command: getCommandText(validationCommand),
+            status: "failed",
+            category: validationCommand.category,
+            exitCode,
+            stdout,
+            stderr,
+            durationMs: Date.now() - started,
+            findings: createFailureFindings(
+              validationCommand,
+              exitCode,
+              stdout,
+              stderr
+            ),
+            warnings: []
+          });
+        }
+      );
+
+      pollHandle =
+        setInterval(
+          () => {
+            void isPortReachable(port).then(
+              reachable => {
+                if (reachable) {
+                  finish({
+                    name: validationCommand.name,
+                    command: getCommandText(validationCommand),
+                    status: "passed",
+                    category: validationCommand.category,
+                    exitCode: null,
+                    stdout,
+                    stderr,
+                    durationMs: Date.now() - started,
+                    findings: [],
+                    warnings: []
+                  });
+                }
+              }
+            );
+          },
+          runtimeSmokeTestPollIntervalMs
+        );
+
+      budgetHandle =
+        setTimeout(
+          () => {
+            const timeoutMessage =
+              `Server did not become reachable on port ${port} within ${runtimeSmokeTestBudgetMs / 1000}s`;
+
+            finish({
+              name: validationCommand.name,
+              command: getCommandText(validationCommand),
+              status: "failed",
+              category: validationCommand.category,
+              exitCode: null,
+              stdout,
+              stderr,
+              durationMs: Date.now() - started,
+              findings: [
+                createValidationFinding({
+                  severity: getValidationSeverity(validationCommand.category),
+                  category: validationCommand.category,
+                  title: "Runtime did not become reachable",
+                  message: timeoutMessage,
+                  command: getCommandText(validationCommand),
+                  exitCode: null,
+                  evidence: stderr.trim() || stdout.trim() || timeoutMessage,
+                  metadata: {
+                    port,
+                    validationCommand: validationCommand.name
+                  }
+                })
+              ],
+              warnings: []
+            });
+          },
+          runtimeSmokeTestBudgetMs
+        );
+    }
+  );
+}
+
 /**
  * Execute one validation command.
  */
@@ -3746,6 +4212,15 @@ function runCommand(
     validationCommand.name === "Secret Detection"
   ) {
     return runSecretScan(
+      projectPath,
+      validationCommand
+    );
+  }
+
+  if (
+    validationCommand.category === "runtime"
+  ) {
+    return runRuntimeSmokeTest(
       projectPath,
       validationCommand
     );

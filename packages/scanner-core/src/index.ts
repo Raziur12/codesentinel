@@ -237,7 +237,8 @@ export type HealthFactorName =
   | "dependencies"
   | "security"
   | "configuration"
-  | "architecture";
+  | "architecture"
+  | "runtime";
 
 export type HealthFactorStatus =
   | "passed"
@@ -490,7 +491,8 @@ export type FindingCategory =
   | "secret"
   | "architecture"
   | "technology"
-  | "configuration";
+  | "configuration"
+  | "runtime";
 
 export interface CommonFinding {
   id: string;
@@ -1694,6 +1696,434 @@ export class NoopAiProvider implements AiProvider {
   }
 }
 
+const anthropicApiUrl =
+  "https://api.anthropic.com/v1/messages";
+
+const defaultAnthropicModel =
+  "claude-haiku-4-5-20251001";
+
+const anthropicRequestTimeoutMs =
+  15_000;
+
+const anthropicMaxFindingsPerRequest =
+  20;
+
+const anthropicExplanationSectionSchema = {
+  type: "object",
+  properties: {
+    label: {
+      type: "string",
+      enum: ["confirmed", "inferred", "uncertain"]
+    },
+    text: {
+      type: "string"
+    },
+    evidence: {
+      type: "array",
+      items: { type: "string" }
+    }
+  },
+  required: ["label", "text", "evidence"]
+} as const;
+
+const anthropicRootCauseToolSchema = {
+  name: "report_root_cause_analyses",
+  description:
+    "Report a root-cause analysis for each supplied finding or warning.",
+  input_schema: {
+    type: "object",
+    properties: {
+      analyses: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            findingId: { type: "string" },
+            severity: {
+              type: "string",
+              enum: ["critical", "high", "medium", "low", "info"]
+            },
+            category: { type: "string" },
+            code: { type: "string" },
+            title: { type: "string" },
+            location: {
+              type: "object",
+              properties: {
+                file: { type: "string" },
+                line: { type: "number" },
+                column: { type: "number" }
+              }
+            },
+            rootCause: anthropicExplanationSectionSchema,
+            whyItHappened: anthropicExplanationSectionSchema,
+            codeCausedIt: anthropicExplanationSectionSchema,
+            howToFix: anthropicExplanationSectionSchema,
+            potentialSideEffects: anthropicExplanationSectionSchema
+          },
+          required: [
+            "findingId",
+            "severity",
+            "category",
+            "title",
+            "rootCause",
+            "whyItHappened",
+            "codeCausedIt",
+            "howToFix",
+            "potentialSideEffects"
+          ]
+        }
+      }
+    },
+    required: ["analyses"]
+  }
+} as const;
+
+function isPlausibleRootCauseAnalysis(
+  value: unknown
+): value is AiFindingRootCauseAnalysis {
+  if (
+    typeof value !== "object" ||
+    value === null
+  ) {
+    return false;
+  }
+
+  const candidate =
+    value as Record<string, unknown>;
+
+  return (
+    typeof candidate.findingId === "string" &&
+    typeof candidate.title === "string" &&
+    typeof candidate.rootCause === "object" &&
+    typeof candidate.whyItHappened === "object" &&
+    typeof candidate.codeCausedIt === "object" &&
+    typeof candidate.howToFix === "object" &&
+    typeof candidate.potentialSideEffects === "object"
+  );
+}
+
+function buildAnthropicRootCausePrompt(
+  input: AiAnalysisInput
+): string {
+  const issues =
+    [
+      ...input.findings,
+      ...input.warnings
+    ].slice(
+      0,
+      anthropicMaxFindingsPerRequest
+    );
+
+  const issuesJson =
+    JSON.stringify(
+      issues.map(
+        issue => ({
+          id: issue.id,
+          severity: issue.severity,
+          category: issue.category,
+          code: issue.code,
+          title: issue.title,
+          message: issue.message,
+          file: issue.file,
+          line: issue.line,
+          column: issue.column,
+          suggestion: issue.suggestion
+        })
+      ),
+      null,
+      2
+    );
+
+  return [
+    "You are analyzing findings from a deterministic software validation scan.",
+    "The findings themselves are already confirmed by real tooling (build/test/lint/type-check/security/secret scanners) - do not second-guess whether they occurred.",
+    "For each finding below, call the report_root_cause_analyses tool with one analysis per finding, explaining: rootCause, whyItHappened, codeCausedIt, howToFix, and potentialSideEffects.",
+    "Every explanation section must carry a label of \"confirmed\" (directly supported by the evidence given), \"inferred\" (a reasonable deduction beyond the given evidence), or \"uncertain\" (a guess that should be verified). Do not fabricate certainty.",
+    "",
+    `Findings and warnings (${issues.length} of ${input.findings.length + input.warnings.length}):`,
+    issuesJson
+  ].join("\n");
+}
+
+/**
+ * Calls the Anthropic Messages API with a tool-use request forcing
+ * schema-constrained JSON output, so the response is parsed directly
+ * rather than extracted from free-text.
+ */
+async function callAnthropicForRootCause(
+  input: AiAnalysisInput,
+  apiKey: string,
+  model: string
+): Promise<AiFindingRootCauseAnalysis[]> {
+  const controller =
+    new AbortController();
+
+  const timeoutHandle =
+    setTimeout(
+      () => controller.abort(),
+      anthropicRequestTimeoutMs
+    );
+
+  try {
+    const response =
+      await fetch(
+        anthropicApiUrl,
+        {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01"
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 4096,
+            tools: [anthropicRootCauseToolSchema],
+            tool_choice: {
+              type: "tool",
+              name: "report_root_cause_analyses"
+            },
+            messages: [
+              {
+                role: "user",
+                content: buildAnthropicRootCausePrompt(input)
+              }
+            ]
+          })
+        }
+      );
+
+    if (
+      !response.ok
+    ) {
+      throw new Error(
+        `Anthropic API responded with status ${response.status}`
+      );
+    }
+
+    const payload =
+      await response.json() as {
+        content?: Array<{
+          type: string;
+          name?: string;
+          input?: unknown;
+        }>;
+      };
+
+    const toolUseBlock =
+      payload.content?.find(
+        block =>
+          block.type === "tool_use" &&
+          block.name === "report_root_cause_analyses"
+      );
+
+    const analyses =
+      (toolUseBlock?.input as { analyses?: unknown[] } | undefined)?.analyses;
+
+    if (
+      !Array.isArray(analyses) ||
+      analyses.length === 0 ||
+      !analyses.every(isPlausibleRootCauseAnalysis)
+    ) {
+      throw new Error(
+        "Anthropic response did not contain a well-formed root-cause analysis"
+      );
+    }
+
+    return analyses;
+  } finally {
+    clearTimeout(
+      timeoutHandle
+    );
+  }
+}
+
+/**
+ * AI provider backed by a real call to the Anthropic Messages API.
+ *
+ * Explicitly opt-in only (selected via createAiProvider("anthropic"));
+ * it is never the default provider, so existing callers and tests keep
+ * using LocalDeterministicAiProvider unless they ask for this one.
+ *
+ * Every method fails open to LocalDeterministicAiProvider - no API key,
+ * a network error, a timeout, or a malformed response all fall back to
+ * the deterministic template output (with a skipped.reason explaining
+ * why) rather than crashing the scan or returning nothing.
+ */
+export class AnthropicAiProvider implements AiProvider {
+  id =
+    "anthropic";
+
+  name =
+    "Anthropic AI provider";
+
+  capabilities = {
+    analyzeFindings:
+      true,
+    explainFinding:
+      true,
+    suggestFix:
+      true,
+    generatePatch:
+      true
+  };
+
+  private readonly fallback =
+    new LocalDeterministicAiProvider();
+
+  private getModel(): string {
+    return process.env.ANTHROPIC_MODEL?.trim() || defaultAnthropicModel;
+  }
+
+  async analyzeFindings(
+    input: AiAnalysisInput
+  ): Promise<AiRootCauseAnalysis> {
+    const apiKey =
+      process.env.ANTHROPIC_API_KEY?.trim();
+
+    const issues =
+      [
+        ...input.findings,
+        ...input.warnings
+      ];
+
+    if (
+      !apiKey
+    ) {
+      const fallbackResult =
+        await this.fallback.analyzeFindings(
+          input
+        );
+
+      return {
+        ...fallbackResult,
+        skipped: {
+          reason:
+            "ANTHROPIC_API_KEY not set; used local-deterministic fallback",
+          count:
+            fallbackResult.skipped.count
+        }
+      };
+    }
+
+    if (
+      issues.length === 0
+    ) {
+      return this.fallback.analyzeFindings(
+        input
+      );
+    }
+
+    try {
+      const analyses =
+        await callAnthropicForRootCause(
+          input,
+          apiKey,
+          this.getModel()
+        );
+
+      return {
+        schemaVersion:
+          "1.0.0",
+        generatedAt:
+          input.generatedAt,
+        purpose:
+          "ai-root-cause-analysis",
+        guardrails:
+          input.guardrails,
+        analyses,
+        skipped:
+          {
+            reason:
+              issues.length > analyses.length
+                ? `Only the first ${analyses.length} of ${issues.length} findings/warnings were sent to Anthropic`
+                : "All active findings and warnings are analyzed",
+            count:
+              Math.max(
+                0,
+                issues.length - analyses.length
+              )
+          }
+      };
+    } catch (error) {
+      const fallbackResult =
+        await this.fallback.analyzeFindings(
+          input
+        );
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
+      return {
+        ...fallbackResult,
+        skipped: {
+          reason:
+            `Anthropic call failed (${message}); used local-deterministic fallback`,
+          count:
+            fallbackResult.skipped.count
+        }
+      };
+    }
+  }
+
+  async explainFinding(
+    finding: AiFindingInput,
+    context: AiAnalysisInput
+  ): Promise<AiFindingRootCauseAnalysis> {
+    const analysis =
+      await this.analyzeFindings({
+        ...context,
+        findings:
+          [finding],
+        warnings:
+          []
+      });
+
+    const result =
+      analysis.analyses[0];
+
+    if (
+      !result
+    ) {
+      return this.fallback.explainFinding(
+        finding,
+        context
+      );
+    }
+
+    return result;
+  }
+
+  async suggestFix(
+    rootCauseAnalysis: AiRootCauseAnalysis,
+    mode?: AiFixMode
+  ): Promise<AiFixSuggestions> {
+    // Fix suggestions are template-derived scaffolding around an
+    // already-computed root-cause analysis, with guardrails
+    // (suggestion-only, no automatic patch application) that are fixed
+    // safety properties rather than something an LLM should decide -
+    // so this reuses the same deterministic logic regardless of which
+    // provider produced the root-cause analysis above.
+    return createAiFixSuggestions({
+      rootCauseAnalysis,
+      mode
+    });
+  }
+
+  async generatePatch(
+    fixSuggestions: AiFixSuggestions
+  ): Promise<AiPatchPlan> {
+    return createAiPatchPlan({
+      fixSuggestions,
+      provider:
+        this.id
+    });
+  }
+}
+
 export function createAiProvider(
   providerId = "local-deterministic"
 ): AiProvider {
@@ -1703,16 +2133,23 @@ export function createAiProvider(
     return new NoopAiProvider();
   }
 
+  if (
+    providerId === "anthropic"
+  ) {
+    return new AnthropicAiProvider();
+  }
+
   return new LocalDeterministicAiProvider();
 }
 
 function clampScore(
-  value: number
+  value: number,
+  max = 100
 ): number {
   return Math.max(
     0,
     Math.min(
-      100,
+      max,
       Math.round(
         value
       )
@@ -2077,6 +2514,24 @@ export function calculateProjectHealthScore(
     validation: HealthValidationReport;
   }
 ): ProjectHealthScore {
+  // Unlike build/test/lint (always scored, even at half credit when no
+  // script exists), runtime is only scored when a start/dev script was
+  // actually found - discoverValidationPlan always registers a runtime
+  // command (skipped when inapplicable), so most existing projects would
+  // otherwise silently pick up an extra, always-skipped factor and see
+  // their maxScore/score shift even though nothing about them changed.
+  const runtimeResult =
+    getValidationResult(
+      input.validation,
+      "runtime"
+    );
+
+  const isRuntimeApplicable =
+    Boolean(
+      runtimeResult &&
+      runtimeResult.status !== "skipped"
+    );
+
   const factors: HealthFactor[] = [
     createValidationHealthFactor(
       input.validation,
@@ -2119,8 +2574,26 @@ export function calculateProjectHealthScore(
     ),
     getArchitectureHealthFactor(
       input.projectStructure
-    )
+    ),
+    ...(isRuntimeApplicable
+      ? [
+          createValidationHealthFactor(
+            input.validation,
+            "runtime",
+            "runtime",
+            "Runtime",
+            10
+          )
+        ]
+      : [])
   ];
+
+  const maxScore =
+    factors.reduce(
+      (total, factor) =>
+        total + factor.maxScore,
+      0
+    );
 
   const score =
     clampScore(
@@ -2128,7 +2601,8 @@ export function calculateProjectHealthScore(
         (total, factor) =>
           total + factor.score,
         0
-      )
+      ),
+      maxScore
     );
 
   const failedFactors =
@@ -2145,11 +2619,12 @@ export function calculateProjectHealthScore(
 
   return {
     score,
-    maxScore:
-      100,
+    maxScore,
     grade:
       getHealthGrade(
-        score
+        maxScore > 0
+          ? (score / maxScore) * 100
+          : 100
       ),
     summary:
       failedFactors > 0

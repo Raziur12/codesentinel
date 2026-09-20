@@ -213,3 +213,77 @@ test(
     );
   }
 );
+
+test(
+  "createAiProvider defaults to local-deterministic even when an Anthropic API key is present",
+  async () => {
+    const previousKey =
+      process.env.ANTHROPIC_API_KEY;
+
+    process.env.ANTHROPIC_API_KEY =
+      "test-key-should-not-change-default";
+
+    try {
+      const provider =
+        createAiProvider();
+
+      assert.equal(
+        provider.id,
+        "local-deterministic"
+      );
+    } finally {
+      if (
+        previousKey === undefined
+      ) {
+        delete process.env.ANTHROPIC_API_KEY;
+      } else {
+        process.env.ANTHROPIC_API_KEY =
+          previousKey;
+      }
+    }
+  }
+);
+
+test(
+  "anthropic provider falls back to local-deterministic analysis without a configured API key",
+  async () => {
+    const previousKey =
+      process.env.ANTHROPIC_API_KEY;
+
+    delete process.env.ANTHROPIC_API_KEY;
+
+    try {
+      const provider =
+        createAiProvider(
+          "anthropic"
+        );
+
+      assert.equal(
+        provider.id,
+        "anthropic"
+      );
+
+      const rootCause =
+        await provider.analyzeFindings(
+          input
+        );
+
+      assert.equal(
+        rootCause.analyses.length,
+        1
+      );
+
+      assert.match(
+        rootCause.skipped.reason,
+        /ANTHROPIC_API_KEY/
+      );
+    } finally {
+      if (
+        previousKey !== undefined
+      ) {
+        process.env.ANTHROPIC_API_KEY =
+          previousKey;
+      }
+    }
+  }
+);

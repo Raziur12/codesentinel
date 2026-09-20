@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "test": "npm run build && node --test dist/github-url.test.js"
   },
   "dependencies": {
     "@codesentinel/database": "0.0.1",

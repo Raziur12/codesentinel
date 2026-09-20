@@ -30,6 +30,11 @@ interface CreateScanRequest {
   projectPath?: string;
 }
 
+interface CreateGithubScanRequest {
+  repositoryUrl?: string;
+  ref?: string;
+}
+
 interface CreateProjectRequest {
   name?: string;
   path?: string;
@@ -849,6 +854,119 @@ function sanitizeRelativeUploadPath(
   );
 }
 
+interface GithubRepositoryTarget {
+  normalizedUrl: string;
+  owner: string;
+  repo: string;
+}
+
+type GithubRepositoryValidation =
+  | { ok: true; target: GithubRepositoryTarget }
+  | { ok: false; error: string };
+
+const githubRepositoryPathPattern =
+  /^\/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38})?)\/([A-Za-z0-9._-]{1,100}?)(?:\.git)?\/?$/;
+
+export function validateGithubRepositoryUrl(
+  rawValue: string | undefined
+): GithubRepositoryValidation {
+  if (
+    typeof rawValue !== "string" ||
+    rawValue.trim().length === 0
+  ) {
+    return {
+      ok: false,
+      error: "repositoryUrl is required"
+    };
+  }
+
+  if (
+    rawValue.length > 512 ||
+    /[\s\x00-\x1f]/.test(rawValue)
+  ) {
+    return {
+      ok: false,
+      error: "repositoryUrl is invalid"
+    };
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(rawValue);
+  } catch {
+    return {
+      ok: false,
+      error: "repositoryUrl is not a valid URL"
+    };
+  }
+
+  if (
+    url.protocol !== "https:" ||
+    url.hostname.toLowerCase() !== "github.com" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.port !== "" ||
+    url.search !== "" ||
+    url.hash !== ""
+  ) {
+    return {
+      ok: false,
+      error: "repositoryUrl must be a plain https://github.com/<owner>/<repo> URL"
+    };
+  }
+
+  const match =
+    githubRepositoryPathPattern.exec(
+      url.pathname
+    );
+
+  if (
+    !match
+  ) {
+    return {
+      ok: false,
+      error: "repositoryUrl must point to a GitHub owner/repo path"
+    };
+  }
+
+  const [, owner, repo] = match;
+
+  return {
+    ok: true,
+    target: {
+      normalizedUrl: `https://github.com/${owner}/${repo}.git`,
+      owner,
+      repo
+    }
+  };
+}
+
+export function sanitizeGitRef(
+  value: string | undefined
+): string | undefined {
+  if (
+    typeof value !== "string"
+  ) {
+    return undefined;
+  }
+
+  const trimmed =
+    value.trim();
+
+  if (
+    trimmed.length === 0 ||
+    trimmed.length > 200 ||
+    trimmed.startsWith("-") ||
+    trimmed.includes("..") ||
+    !/^[A-Za-z0-9._/-]+$/.test(trimmed)
+  ) {
+    return undefined;
+  }
+
+  return trimmed;
+}
+
 function isZipBuffer(
   body: Buffer
 ): boolean {
@@ -1112,6 +1230,117 @@ async function extractZipArchive(
   );
 }
 
+const githubCloneTimeoutMs = 120_000;
+const githubCloneKillGraceMs = 5_000;
+
+function cloneGithubRepository(
+  cloneUrl: string,
+  ref: string | undefined,
+  destinationPath: string
+): Promise<void> {
+  return new Promise(
+    (resolve, reject) => {
+      const args = [
+        "clone",
+        "--depth",
+        "1",
+        ...(ref ? ["--branch", ref] : []),
+        "--single-branch",
+        cloneUrl,
+        destinationPath
+      ];
+
+      const child = spawn(
+        "git",
+        args,
+        {
+          windowsHide: true,
+          stdio: ["ignore", "ignore", "pipe"]
+        }
+      );
+
+      let stderr = "";
+      let settled = false;
+
+      const timeoutHandle = setTimeout(
+        () => {
+          child.kill("SIGTERM");
+
+          setTimeout(
+            () => {
+              if (!settled) {
+                child.kill("SIGKILL");
+              }
+            },
+            githubCloneKillGraceMs
+          );
+
+          if (!settled) {
+            settled = true;
+            reject(
+              new Error(
+                `git clone timed out after ${githubCloneTimeoutMs / 1000}s`
+              )
+            );
+          }
+        },
+        githubCloneTimeoutMs
+      );
+
+      child.stderr?.on(
+        "data",
+        data => {
+          stderr += data.toString();
+        }
+      );
+
+      child.on(
+        "error",
+        error => {
+          clearTimeout(timeoutHandle);
+
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+
+          const message =
+            (error as NodeJS.ErrnoException).code === "ENOENT"
+              ? "git is not installed or not available on PATH"
+              : error.message;
+
+          reject(new Error(message));
+        }
+      );
+
+      child.on(
+        "close",
+        exitCode => {
+          clearTimeout(timeoutHandle);
+
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+
+          if (exitCode === 0) {
+            resolve();
+            return;
+          }
+
+          reject(
+            new Error(
+              stderr.trim() || `git clone exited with code ${exitCode}`
+            )
+          );
+        }
+      );
+    }
+  );
+}
+
 async function hasProjectMarker(
   directoryPath: string
 ): Promise<boolean> {
@@ -1250,6 +1479,61 @@ async function createUploadedProjectWorkspace(
   await extractZipArchive(
     archivePath,
     workspaceDirectory
+  );
+
+  return findUploadedProjectRoot(
+    workspaceDirectory
+  );
+}
+
+async function createGithubProjectWorkspace(
+  repositoryUrl: string,
+  ref: string | undefined
+): Promise<string> {
+  await fs.mkdir(
+    uploadStorageDirectory,
+    {
+      recursive: true
+    }
+  );
+
+  const uploadId =
+    createUploadId();
+
+  const workspaceDirectory =
+    path.join(
+      uploadStorageDirectory,
+      uploadId,
+      "workspace"
+    );
+
+  await fs.mkdir(
+    workspaceDirectory,
+    {
+      recursive: true
+    }
+  );
+
+  await cloneGithubRepository(
+    repositoryUrl,
+    ref,
+    workspaceDirectory
+  );
+
+  // Unlike a ZIP/file upload, a fresh clone always contains a top-level
+  // .git directory. If the repo has no root-level project marker,
+  // findUploadedProjectRoot's single-subdirectory fallback would treat
+  // .git itself as "the one directory" and misidentify it as the
+  // project root, so it is removed before root detection runs.
+  await fs.rm(
+    path.join(
+      workspaceDirectory,
+      ".git"
+    ),
+    {
+      recursive: true,
+      force: true
+    }
   );
 
   return findUploadedProjectRoot(
@@ -2010,6 +2294,63 @@ async function createZipUploadScan(
   }
 }
 
+async function createGithubScan(
+  request: http.IncomingMessage
+): Promise<ApiResponse> {
+  const body =
+    await readJsonRequest<CreateGithubScanRequest>(
+      request
+    );
+
+  const validation =
+    validateGithubRepositoryUrl(
+      body.repositoryUrl
+    );
+
+  if (
+    !validation.ok
+  ) {
+    return {
+      status: 400,
+      body: {
+        error: validation.error
+      }
+    };
+  }
+
+  const ref =
+    sanitizeGitRef(
+      body.ref
+    );
+
+  try {
+    const projectPath =
+      await createGithubProjectWorkspace(
+        validation.target.normalizedUrl,
+        ref
+      );
+
+    return createScanFromBody(
+      request,
+      {
+        projectPath
+      }
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    return {
+      status: 400,
+      body: {
+        error: message.slice(0, 2000)
+      }
+    };
+  }
+}
+
 async function createFilesUploadScan(
   request: http.IncomingMessage
 ): Promise<ApiResponse> {
@@ -2542,6 +2883,7 @@ export async function handleApiRequest(
               "POST /scans",
               "POST /uploads/files",
               "POST /uploads/zip",
+              "POST /scans/github",
               "GET /scans",
               "GET /scans/:id",
               "GET /scans/:id/findings",
@@ -2638,6 +2980,17 @@ export async function handleApiRequest(
     parts.length === 2
   ) {
     return createZipUploadScan(
+      request
+    );
+  }
+
+  if (
+    request.method === "POST" &&
+    parts[0] === "scans" &&
+    parts[1] === "github" &&
+    parts.length === 2
+  ) {
+    return createGithubScan(
       request
     );
   }
