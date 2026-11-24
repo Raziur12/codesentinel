@@ -117,6 +117,16 @@ codesentinel/
     └── scanner/fixtures/      # Real-world project fixtures for validation testing
 ```
 
+---
+
+## 🚧 What is Still In Progress or Partial
+
+- **Live Anthropic AI Provider**: Scaffolded, but needs a real `ANTHROPIC_API_KEY` and end-to-end prompt tuning.
+- **Runtime Smoke Testing**: Executing arbitrary apps in live isolated runtime containers is not yet finished.
+- **Automated GitHub Cloning**: Full remote Git repository integration via the web UI is being wired up.
+- **Monorepo Sub-workspace Testing**: Sub-package targeted scans in certain monorepo structures have edge cases still being refined.
+
+
 
 ---
 
