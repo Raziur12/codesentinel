@@ -10,19 +10,23 @@
   </head>
   <body class="architecture-page">
     <header class="arch-topbar">
-      <a class="arch-back" href="/">&larr; Dashboard</a>
-      <div class="arch-title">
-        <img src="/logo.svg" alt="">
-        <div>
-          <strong>CodeSentinel</strong>
-          <span>Architecture</span>
+      <div class="arch-topbar-nav">
+        <a class="arch-back" href="/">&larr; Dashboard</a>
+        <div class="arch-title">
+          <img src="/logo.svg" alt="">
+          <div>
+            <strong>CodeSentinel</strong>
+            <span>Architecture</span>
+          </div>
         </div>
       </div>
-      <label class="arch-project-picker">
-        <span>Project</span>
-        <select id="arch-project-select"></select>
-      </label>
-      <span id="arch-connection" class="arch-connection"></span>
+      <div class="arch-topbar-controls">
+        <label class="arch-project-picker">
+          <span>Project</span>
+          <select id="arch-project-select"></select>
+        </label>
+        <span id="arch-connection" class="arch-connection"></span>
+      </div>
     </header>
 
     <main id="arch-canvas-wrap" class="arch-canvas-wrap">
