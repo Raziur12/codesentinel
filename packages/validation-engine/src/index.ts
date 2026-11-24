@@ -168,6 +168,10 @@ interface PackageJson {
 
   devDependencies?: Record<string, string>;
 
+  peerDependencies?: Record<string, string>;
+
+  optionalDependencies?: Record<string, string>;
+
   packageManager?: string;
 
   workspaces?: string[] | {
@@ -705,6 +709,62 @@ function getWorkspacePatterns(
   }
 
   return packageJson.workspaces.packages ?? [];
+}
+
+function matchesWorkspacePattern(
+  rootPath: string,
+  targetPath: string,
+  pattern: string
+): boolean {
+  const rel = path.relative(rootPath, targetPath).replace(/\\/g, "/");
+  const normalized = pattern.replace(/\\/g, "/");
+  if (normalized.endsWith("/*")) {
+    const prefix = normalized.slice(0, -2);
+    const dir = path.posix.dirname(rel);
+    return dir === prefix;
+  }
+  return rel === normalized;
+}
+
+async function findParentWorkspaceRoot(
+  projectPath: string
+): Promise<{ rootPath: string; patterns: string[] } | null> {
+  const targetPath = path.resolve(projectPath);
+  let currentDirectory = path.dirname(targetPath);
+
+  while (true) {
+    const packageJsonPath = path.join(currentDirectory, "package.json");
+    try {
+      const content = await fs.readFile(packageJsonPath, "utf8");
+      const packageJson = JSON.parse(content) as PackageJson;
+      const patterns = getWorkspacePatterns(packageJson);
+      if (
+        patterns.length > 0 &&
+        patterns.some(pattern =>
+          matchesWorkspacePattern(
+            currentDirectory,
+            targetPath,
+            pattern
+          )
+        )
+      ) {
+        return {
+          rootPath: currentDirectory,
+          patterns
+        };
+      }
+    } catch {
+      // Continue searching parent directories
+    }
+
+    const parentDirectory = path.dirname(currentDirectory);
+    if (parentDirectory === currentDirectory) {
+      break;
+    }
+    currentDirectory = parentDirectory;
+  }
+
+  return null;
 }
 
 async function getRootFiles(
@@ -1365,6 +1425,20 @@ function getDependencies(
     ...Object.keys(packageJson?.dependencies ?? {}),
     ...Object.keys(packageJson?.devDependencies ?? {})
   ]);
+}
+
+function hasPackageDependencies(
+  packageJson: PackageJson | null
+): boolean {
+  if (!packageJson) {
+    return false;
+  }
+  return Boolean(
+    (packageJson.dependencies && Object.keys(packageJson.dependencies).length > 0) ||
+    (packageJson.devDependencies && Object.keys(packageJson.devDependencies).length > 0) ||
+    (packageJson.peerDependencies && Object.keys(packageJson.peerDependencies).length > 0) ||
+    (packageJson.optionalDependencies && Object.keys(packageJson.optionalDependencies).length > 0)
+  );
 }
 
 function hasDependency(
@@ -2311,7 +2385,8 @@ function createLintCommand(
 
 function createSecurityAuditCommand(
   packageManager: string,
-  packageJson: PackageJson | null
+  packageJson: PackageJson | null,
+  isWorkspacePackage: boolean = false
 ): ValidationCommand {
   if (
     !packageJson
@@ -2327,6 +2402,23 @@ function createSecurityAuditCommand(
       ],
       false,
       "No package.json found"
+    );
+  }
+
+  if (
+    isWorkspacePackage
+  ) {
+    return createCommand(
+      "Security Audit",
+      "security",
+      60,
+      packageManager,
+      [
+        "audit",
+        "--json"
+      ],
+      false,
+      "Security audit for workspace packages is performed at the monorepo root"
     );
   }
 
@@ -2564,6 +2656,14 @@ export async function discoverValidationPlan(
       workspacePatterns
     );
 
+  const parentWorkspace =
+    await findParentWorkspaceRoot(
+      projectPath
+    );
+
+  const isWorkspacePackage =
+    Boolean(parentWorkspace);
+
   const typeScriptProject =
     detectTypeScriptProject(
       projectFiles,
@@ -2595,15 +2695,8 @@ export async function discoverValidationPlan(
     );
 
   const installCommand =
-    packageJson
+    !packageJson
       ? createCommand(
-          "Install dependencies",
-          "dependency",
-          10,
-          packageManager,
-          packageManagerCommands.install
-        )
-      : createCommand(
           "Install dependencies",
           "dependency",
           10,
@@ -2611,7 +2704,24 @@ export async function discoverValidationPlan(
           packageManagerCommands.install,
           false,
           "No package.json found"
-        );
+        )
+      : isWorkspacePackage
+        ? createCommand(
+            "Install dependencies",
+            "dependency",
+            10,
+            packageManager,
+            packageManagerCommands.install,
+            false,
+            "Workspace package dependencies are managed from the monorepo root"
+          )
+        : createCommand(
+            "Install dependencies",
+            "dependency",
+            10,
+            packageManager,
+            packageManagerCommands.install
+          );
 
   const typeCheckExec =
     packageManagerCommands.exec(
@@ -2668,7 +2778,8 @@ export async function discoverValidationPlan(
         typeCheckCommand,
         createSecurityAuditCommand(
           packageManager,
-          packageJson
+          packageJson,
+          isWorkspacePackage
         ),
         createSecretScanCommand(),
         createRuntimeCommand(

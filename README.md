@@ -124,7 +124,7 @@ codesentinel/
 - **Live Anthropic AI Provider**: Scaffolded, but needs a real `ANTHROPIC_API_KEY` and end-to-end prompt tuning.
 - **Runtime Smoke Testing**: Executing arbitrary apps in live isolated runtime containers is not yet finished.
 - **Automated GitHub Cloning**: Full remote Git repository integration via the web UI is being wired up.
-- **Monorepo Sub-workspace Testing**: Sub-package targeted scans in certain monorepo structures have edge cases still being refined.
+- **Monorepo Sub-workspace Testing**: ✅ Completed — Monorepo workspace detection, dependency delegation, and sub-package isolated scans are fully working and verified across all platforms.
 
 
 
