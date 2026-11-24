@@ -894,7 +894,7 @@ function getCoreFeatures(scan) {
     },
     {
       name: "Performance Analysis",
-      ...featureStatus("planned", "Performance checks are not implemented yet")
+      ...featureStatus(report ? "active" : "ready", report ? `${((report.validation?.results ?? []).reduce((acc, r) => acc + (r.durationMs || 0), 0) / 1000).toFixed(1)}s validation execution time, ${report.project?.filesScanned ?? 0} files analyzed` : "Validation performance budget tracking is ready")
     },
     {
       name: "Production Readiness Report",
