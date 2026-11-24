@@ -1279,7 +1279,11 @@ function cloneGithubRepository(
         args,
         {
           windowsHide: true,
-          stdio: ["ignore", "ignore", "pipe"]
+          stdio: ["ignore", "ignore", "pipe"],
+          env: {
+            ...process.env,
+            GIT_TERMINAL_PROMPT: "0"
+          }
         }
       );
 

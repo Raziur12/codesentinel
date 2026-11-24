@@ -1230,6 +1230,9 @@ function setInlineNotice(text, ok = true) {
  */
 async function createGithubGroupScan(repositories, groupLabel) {
   let response;
+  elements.runScan.disabled = true;
+  elements.runScan.textContent = "Scanning Repo...";
+  setInlineNotice("Cloning repository and initiating scan...", true);
 
   try {
     response = await fetchJson("/scans/github/group", {
@@ -1242,6 +1245,9 @@ async function createGithubGroupScan(repositories, groupLabel) {
   } catch (error) {
     setConnection(error.message, false);
     return;
+  } finally {
+    elements.runScan.disabled = false;
+    updatePrimaryActionLabel();
   }
 
   const outcomes = response.scans ?? [];
@@ -1351,7 +1357,7 @@ function createGithubRepoRow() {
   row.className = "github-repo-row";
   row.innerHTML = `
     <input type="text" class="github-repo-label" placeholder="Label (e.g. Frontend)" aria-label="Repository label">
-    <input type="url" class="github-repo-url" placeholder="https://github.com/owner/repo" aria-label="Repository URL">
+    <input type="text" inputmode="url" class="github-repo-url" placeholder="https://github.com/owner/repo" aria-label="Repository URL">
     <button type="button" class="ghost remove-repo-row" aria-label="Remove repository">&times;</button>
   `;
 
@@ -1372,10 +1378,16 @@ function addGithubRepoRow() {
 
 function getGithubRepositories() {
   return Array.from(elements.githubRepoList.querySelectorAll(".github-repo-row"))
-    .map(row => ({
-      label: row.querySelector(".github-repo-label").value.trim(),
-      repositoryUrl: row.querySelector(".github-repo-url").value.trim()
-    }))
+    .map(row => {
+      let url = row.querySelector(".github-repo-url").value.trim();
+      if (url && !/^https?:\/\//i.test(url)) {
+        url = `https://${url}`;
+      }
+      return {
+        label: row.querySelector(".github-repo-label").value.trim(),
+        repositoryUrl: url
+      };
+    })
     .filter(repo => repo.repositoryUrl.length > 0);
 }
 
@@ -1436,6 +1448,11 @@ function updatePrimaryActionLabel() {
 }
 
 elements.form.addEventListener("submit", event => {
+  event.preventDefault();
+  startScanFromSelectedSource();
+});
+
+elements.runScan.addEventListener("click", event => {
   event.preventDefault();
   startScanFromSelectedSource();
 });
