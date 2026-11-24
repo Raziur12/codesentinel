@@ -8,14 +8,18 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
+    <div id="sidebar-scrim" class="sidebar-scrim"></div>
     <div class="shell">
-      <aside class="sidebar">
+      <aside id="sidebar" class="sidebar">
         <div class="brand">
-          <img src="/logo.svg" alt="">
-          <div>
-            <strong>CodeSentinel</strong>
-            <span>Project Health</span>
+          <div class="brand-info">
+            <img src="/logo.svg" alt="">
+            <div>
+              <strong>CodeSentinel</strong>
+              <span>Project Health</span>
+            </div>
           </div>
+          <button id="sidebar-close-btn" class="sidebar-close-btn ghost" type="button" aria-label="Close menu">&times;</button>
         </div>
         <nav class="nav">
           <button class="nav-item active" data-view="overview" title="Overview">
@@ -50,6 +54,20 @@
       </aside>
 
       <main class="main">
+        <header class="mobile-topbar">
+          <button id="mobile-menu-btn" class="mobile-menu-btn" type="button" aria-label="Open menu">
+            <span class="hamburger-bar"></span>
+            <span class="hamburger-bar"></span>
+            <span class="hamburger-bar"></span>
+          </button>
+          <div class="mobile-brand">
+            <img src="/logo.svg" alt="CodeSentinel">
+            <span class="mobile-brand-title">CodeSentinel</span>
+            <span id="mobile-view-pill" class="mobile-view-pill">Overview</span>
+          </div>
+          <div id="mobile-status-dot" class="mobile-status-dot" title="API status"></div>
+        </header>
+
         <section class="metrics">
           <article class="metric">
             <span>Projects</span>
@@ -165,16 +183,22 @@
 
             <section class="panel findings-view view" data-view-panel="findings">
               <div class="panel-header">
-                <h2>Findings</h2>
-                <span id="findings-label"></span>
+                <div>
+                  <h2>Findings</h2>
+                  <span id="findings-label"></span>
+                </div>
+                <button class="ghost back-to-overview-btn" type="button" data-jump-view="overview">&larr; Overview</button>
               </div>
               <div id="findings-list" class="findings-list"></div>
             </section>
 
             <section class="panel ai-view view" data-view-panel="ai">
               <div class="panel-header">
-                <h2>AI Explanations</h2>
-                <span id="ai-label"></span>
+                <div>
+                  <h2>AI Explanations</h2>
+                  <span id="ai-label"></span>
+                </div>
+                <button class="ghost back-to-overview-btn" type="button" data-jump-view="overview">&larr; Overview</button>
               </div>
               <div id="ai-list" class="ai-list"></div>
               <h3>Fix Suggestions</h3>
@@ -183,24 +207,33 @@
 
             <section class="panel features-view view" data-view-panel="features">
               <div class="panel-header">
-                <h2>Core Features</h2>
-                <span id="features-label"></span>
+                <div>
+                  <h2>Core Features</h2>
+                  <span id="features-label"></span>
+                </div>
+                <button class="ghost back-to-overview-btn" type="button" data-jump-view="overview">&larr; Overview</button>
               </div>
               <div id="core-features" class="feature-grid"></div>
             </section>
 
             <section class="panel trends-view view" data-view-panel="trends">
               <div class="panel-header">
-                <h2>Trends</h2>
-                <span id="trends-label"></span>
+                <div>
+                  <h2>Trends</h2>
+                  <span id="trends-label"></span>
+                </div>
+                <button class="ghost back-to-overview-btn" type="button" data-jump-view="overview">&larr; Overview</button>
               </div>
               <div id="trend-list" class="trend-list"></div>
             </section>
 
             <section class="panel fixes-view view" data-view-panel="fixes">
               <div class="panel-header">
-                <h2>Fixes</h2>
-                <span id="fixes-label"></span>
+                <div>
+                  <h2>Fixes</h2>
+                  <span id="fixes-label"></span>
+                </div>
+                <button class="ghost back-to-overview-btn" type="button" data-jump-view="overview">&larr; Overview</button>
               </div>
               <div id="fixes-list"></div>
             </section>

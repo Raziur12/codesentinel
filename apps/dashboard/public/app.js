@@ -62,7 +62,13 @@ const elements = {
   trendsLabel: document.querySelector("#trends-label"),
   trendList: document.querySelector("#trend-list"),
   fixesLabel: document.querySelector("#fixes-label"),
-  fixesList: document.querySelector("#fixes-list")
+  fixesList: document.querySelector("#fixes-list"),
+  sidebar: document.querySelector("#sidebar"),
+  sidebarScrim: document.querySelector("#sidebar-scrim"),
+  sidebarCloseBtn: document.querySelector("#sidebar-close-btn"),
+  mobileMenuBtn: document.querySelector("#mobile-menu-btn"),
+  mobileViewPill: document.querySelector("#mobile-view-pill"),
+  mobileStatusDot: document.querySelector("#mobile-status-dot")
 };
 
 elements.apiUrl.value = state.apiUrl;
@@ -142,6 +148,10 @@ function setConnection(text, ok = true) {
   elements.connectionStatus.style.color = ok ? "#0f9f6e" : "#dc2626";
   elements.connectionStatus.dataset.status = ok ? "ok" : "error";
   elements.connectionHelp.classList.toggle("hidden", ok);
+  if (elements.mobileStatusDot) {
+    elements.mobileStatusDot.dataset.status = ok ? "ok" : "error";
+    elements.mobileStatusDot.title = text;
+  }
 }
 
 async function checkApi() {
@@ -1483,14 +1493,68 @@ elements.addGithubRepo.addEventListener("click", () => {
 
 addGithubRepoRow();
 
+function openMobileSidebar() {
+  elements.sidebar?.classList.add("open");
+  elements.sidebarScrim?.classList.add("visible");
+}
+
+function closeMobileSidebar() {
+  elements.sidebar?.classList.remove("open");
+  elements.sidebarScrim?.classList.remove("visible");
+}
+
+function toggleMobileSidebar() {
+  if (elements.sidebar?.classList.contains("open")) {
+    closeMobileSidebar();
+  } else {
+    openMobileSidebar();
+  }
+}
+
+function switchView(viewName) {
+  if (!viewName) return;
+  document.body.dataset.activeView = viewName;
+  document.querySelectorAll(".nav-item").forEach(item => {
+    if (item.dataset.view) {
+      item.classList.toggle("active", item.dataset.view === viewName);
+    }
+  });
+  document.querySelectorAll(".view").forEach(item => {
+    item.classList.toggle("active", item.dataset.viewPanel === viewName);
+  });
+  if (elements.mobileViewPill) {
+    const titles = {
+      overview: "Overview",
+      findings: "Findings",
+      ai: "AI",
+      features: "Features",
+      trends: "Trends",
+      fixes: "Fixes"
+    };
+    elements.mobileViewPill.textContent = titles[viewName] || viewName;
+  }
+  closeMobileSidebar();
+}
+
+elements.mobileMenuBtn?.addEventListener("click", toggleMobileSidebar);
+elements.sidebarCloseBtn?.addEventListener("click", closeMobileSidebar);
+elements.sidebarScrim?.addEventListener("click", closeMobileSidebar);
+
 for (const button of document.querySelectorAll(".nav-item")) {
   button.addEventListener("click", () => {
-    document.querySelectorAll(".nav-item").forEach(item => item.classList.remove("active"));
-    document.querySelectorAll(".view").forEach(item => item.classList.remove("active"));
-    button.classList.add("active");
-    document.querySelector(`[data-view-panel="${button.dataset.view}"]`)?.classList.add("active");
+    if (button.dataset.view) {
+      switchView(button.dataset.view);
+    }
   });
 }
+
+for (const btn of document.querySelectorAll("[data-jump-view]")) {
+  btn.addEventListener("click", () => {
+    switchView(btn.dataset.jumpView);
+  });
+}
+
+switchView("overview");
 
 if (await checkApi()) {
   await (async () => {
