@@ -69,8 +69,6 @@ const elements = {
   mobileMenuBtn: document.querySelector("#mobile-menu-btn"),
   mobileViewPill: document.querySelector("#mobile-view-pill"),
   mobileStatusDot: document.querySelector("#mobile-status-dot"),
-  overviewHistogram: document.querySelector("#overview-histogram"),
-  overviewHeatmap: document.querySelector("#overview-heatmap"),
   trendLineChart: document.querySelector("#trend-line-chart"),
   trendSummaryStats: document.querySelector("#trend-summary-stats"),
   trendSeabornHeatmap: document.querySelector("#trend-seaborn-heatmap"),
@@ -947,8 +945,6 @@ function renderTrendSplineSvg(scans, width = 640, height = 220) {
 function renderSeverity(scan) {
   if (isScanPending(scan) && !hasReport(scan)) {
     elements.severityDistribution.innerHTML = `<div class="empty">Severity will appear after scan completion</div>`;
-    if (elements.overviewHistogram) elements.overviewHistogram.innerHTML = `<div class="empty">Histogram will appear after scan completion</div>`;
-    if (elements.overviewHeatmap) elements.overviewHeatmap.innerHTML = `<div class="empty">Heatmap will appear after scan completion</div>`;
     return;
   }
 
@@ -977,26 +973,6 @@ function renderSeverity(scan) {
       <span>${count}</span>
     `;
     elements.severityDistribution.append(row);
-  }
-
-  // Overview Histogram
-  if (elements.overviewHistogram) {
-    const histBuckets = [
-      { label: "Critical", value: counts.critical, color: "#ef4444" },
-      { label: "High", value: counts.high, color: "#f97316" },
-      { label: "Medium", value: counts.medium, color: "#f59e0b" },
-      { label: "Low", value: counts.low, color: "#10b981" },
-      { label: "Info", value: counts.info, color: "#3b82f6" }
-    ];
-    elements.overviewHistogram.innerHTML = renderHistogramSvg(histBuckets, 440, 180);
-  }
-
-  // Overview Seaborn Factor Heatmap
-  if (elements.overviewHeatmap) {
-    const factorsList = ["build", "test", "lint", "security", "secrets", "types", "dependencies", "runtime"];
-    elements.overviewHeatmap.innerHTML = scan
-      ? renderSeabornHeatmapSvg(factorsList, [scan], 440, 180)
-      : `<div class="empty">No scan selected</div>`;
   }
 }
 
