@@ -68,7 +68,13 @@ const elements = {
   sidebarCloseBtn: document.querySelector("#sidebar-close-btn"),
   mobileMenuBtn: document.querySelector("#mobile-menu-btn"),
   mobileViewPill: document.querySelector("#mobile-view-pill"),
-  mobileStatusDot: document.querySelector("#mobile-status-dot")
+  mobileStatusDot: document.querySelector("#mobile-status-dot"),
+  overviewHistogram: document.querySelector("#overview-histogram"),
+  overviewHeatmap: document.querySelector("#overview-heatmap"),
+  trendLineChart: document.querySelector("#trend-line-chart"),
+  trendSummaryStats: document.querySelector("#trend-summary-stats"),
+  trendSeabornHeatmap: document.querySelector("#trend-seaborn-heatmap"),
+  trendHistogram: document.querySelector("#trend-histogram")
 };
 
 elements.apiUrl.value = state.apiUrl;
@@ -708,9 +714,241 @@ function renderTechnology(scan) {
   }
 }
 
+function renderHistogramSvg(buckets, width = 440, height = 180) {
+  const pad = { top: 28, right: 18, bottom: 32, left: 32 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const maxVal = Math.max(1, ...buckets.map(b => b.value));
+  const slotW = plotW / buckets.length;
+  const barW = Math.min(38, slotW * 0.65);
+
+  let gridLines = "";
+  const steps = [1, 0.66, 0.33, 0];
+  for (const step of steps) {
+    const y = pad.top + plotH * (1 - step);
+    const val = Math.round(maxVal * step);
+    gridLines += `
+      <line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" stroke="#e2e8f0" stroke-dasharray="3 3" />
+      <text x="${pad.left - 6}" y="${y + 3}" font-size="10" fill="#94a3b8" text-anchor="end" font-family="system-ui, sans-serif">${val}</text>
+    `;
+  }
+
+  let defs = "";
+  let bars = "";
+
+  buckets.forEach((b, i) => {
+    const x = pad.left + i * slotW + (slotW - barW) / 2;
+    const barH = (b.value / maxVal) * plotH;
+    const y = pad.top + plotH - barH;
+    const gradId = `hist-grad-${i}-${Math.round(Math.random() * 1000)}`;
+
+    defs += `
+      <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${b.color}" stop-opacity="0.95" />
+        <stop offset="100%" stop-color="${b.color}" stop-opacity="0.65" />
+      </linearGradient>
+    `;
+
+    bars += `
+      <rect x="${x}" y="${y}" width="${barW}" height="${Math.max(2, barH)}" rx="4" fill="url(#${gradId})" />
+      <text x="${x + barW / 2}" y="${y - 6}" font-size="11" font-weight="700" fill="#1e293b" text-anchor="middle" font-family="system-ui, sans-serif">${b.value}</text>
+      <text x="${x + barW / 2}" y="${height - 10}" font-size="10.5" font-weight="600" fill="#64748b" text-anchor="middle" font-family="system-ui, sans-serif">${html(b.label)}</text>
+    `;
+  });
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+      <defs>${defs}</defs>
+      ${gridLines}
+      ${bars}
+    </svg>
+  `;
+}
+
+function renderSeabornHeatmapSvg(factors, scans, width = 540, height = 220) {
+  const pad = { top: 32, right: 16, bottom: 42, left: 105 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const colCount = Math.max(1, scans.length);
+  const rowCount = factors.length;
+  const cellW = plotW / colCount;
+  const cellH = plotH / rowCount;
+
+  let headers = "";
+  scans.forEach((scan, col) => {
+    const cx = pad.left + col * cellW + cellW / 2;
+    const dateLabel = scan.createdAt ? new Date(scan.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : `#${col + 1}`;
+    headers += `
+      <text x="${cx}" y="${pad.top - 10}" font-size="10.5" font-weight="600" fill="#64748b" text-anchor="middle" font-family="system-ui, sans-serif">
+        ${html(dateLabel)}
+      </text>
+    `;
+  });
+
+  let rows = "";
+  factors.forEach((factor, row) => {
+    const ry = pad.top + row * cellH;
+    const cy = ry + cellH / 2;
+    const factorLabel = factor.charAt(0).toUpperCase() + factor.slice(1);
+
+    rows += `
+      <text x="${pad.left - 10}" y="${cy + 3.5}" font-size="11" font-weight="600" fill="#334155" text-anchor="end" font-family="system-ui, sans-serif">
+        ${html(factorLabel)}
+      </text>
+    `;
+
+    scans.forEach((scan, col) => {
+      const rx = pad.left + col * cellW;
+      const issues = getIssues(scan).filter(i => (i.category || "").toLowerCase() === factor.toLowerCase());
+      const res = getValidationResult(scan, factor);
+      const status = res?.status || (issues.length > 0 ? "failed" : "passed");
+
+      let cellColor = "#10b981"; // seaborn emerald
+      let cellText = `${issues.length}`;
+      let textColor = "#ffffff";
+
+      if (status === "failed" || issues.some(i => ["critical", "high"].includes((i.severity || "").toLowerCase()))) {
+        cellColor = "#ef4444"; // seaborn coral
+      } else if (status === "warning" || issues.length > 0) {
+        cellColor = "#f59e0b"; // seaborn amber
+      } else if (status === "skipped") {
+        cellColor = "#94a3b8"; // seaborn slate
+        cellText = "-";
+      }
+
+      rows += `
+        <rect x="${rx + 2}" y="${ry + 2}" width="${cellW - 4}" height="${cellH - 4}" rx="4" fill="${cellColor}" opacity="0.9">
+          <title>${html(factorLabel)}: ${html(status)} (${issues.length} issue(s))</title>
+        </rect>
+        <text x="${rx + cellW / 2}" y="${cy + 3.5}" font-size="10.5" font-weight="700" fill="${textColor}" text-anchor="middle" font-family="system-ui, sans-serif">
+          ${cellText}
+        </text>
+      `;
+    });
+  });
+
+  // Seaborn Legend Bar
+  const legendY = height - 12;
+  const legend = `
+    <g transform="translate(${pad.left}, ${legendY})">
+      <rect x="0" y="-8" width="12" height="10" rx="2" fill="#10b981" />
+      <text x="16" y="0" font-size="10" fill="#64748b" font-family="system-ui, sans-serif">Pass (0)</text>
+      <rect x="80" y="-8" width="12" height="10" rx="2" fill="#f59e0b" />
+      <text x="96" y="0" font-size="10" fill="#64748b" font-family="system-ui, sans-serif">Warn (1-2)</text>
+      <rect x="165" y="-8" width="12" height="10" rx="2" fill="#ef4444" />
+      <text x="181" y="0" font-size="10" fill="#64748b" font-family="system-ui, sans-serif">Fail / Crit (3+)</text>
+      <rect x="270" y="-8" width="12" height="10" rx="2" fill="#94a3b8" />
+      <text x="286" y="0" font-size="10" fill="#64748b" font-family="system-ui, sans-serif">Skipped</text>
+    </g>
+  `;
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+      ${headers}
+      ${rows}
+      ${legend}
+    </svg>
+  `;
+}
+
+function renderTrendSplineSvg(scans, width = 640, height = 220) {
+  const pad = { top: 25, right: 35, bottom: 40, left: 45 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+
+  if (scans.length === 0) {
+    return `<div class="empty">No scan history available for trend chart</div>`;
+  }
+
+  const yGuides = [
+    { label: "100%", val: 1.0 },
+    { label: "75%", val: 0.75 },
+    { label: "50%", val: 0.50 },
+    { label: "25%", val: 0.25 },
+    { label: "0%", val: 0.0 }
+  ];
+
+  let gridSvg = "";
+  for (const g of yGuides) {
+    const y = pad.top + plotH * (1 - g.val);
+    gridSvg += `
+      <line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" stroke="#e2e8f0" stroke-dasharray="3 3" />
+      <text x="${pad.left - 8}" y="${y + 3.5}" font-size="10" fill="#94a3b8" text-anchor="end" font-family="system-ui, sans-serif">${g.label}</text>
+    `;
+  }
+
+  const n = scans.length;
+  const xStep = n > 1 ? plotW / (n - 1) : 0;
+  const points = scans.map((scan, i) => {
+    const health = getHealthPercent(scan) ?? 0;
+    const issues = getIssues(scan).length;
+    const x = n > 1 ? pad.left + i * xStep : pad.left + plotW / 2;
+    const y = pad.top + plotH * (1 - health / 100);
+    return { x, y, health, issues, scan };
+  });
+
+  let curvePath = "";
+  let areaPath = "";
+
+  if (points.length === 1) {
+    curvePath = `M ${pad.left} ${points[0].y} L ${width - pad.right} ${points[0].y}`;
+    areaPath = `M ${pad.left} ${points[0].y} L ${width - pad.right} ${points[0].y} L ${width - pad.right} ${pad.top + plotH} L ${pad.left} ${pad.top + plotH} Z`;
+  } else {
+    curvePath = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = i > 0 ? points[i - 1] : points[i];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = i < points.length - 2 ? points[i + 2] : p2;
+
+      const cp1x = p1.x + (p2.x - p0.x) / 6;
+      const cp1y = p1.y + (p2.y - p0.y) / 6;
+      const cp2x = p2.x - (p3.x - p1.x) / 6;
+      const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+      curvePath += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+    }
+    areaPath = `${curvePath} L ${points[points.length - 1].x} ${pad.top + plotH} L ${points[0].x} ${pad.top + plotH} Z`;
+  }
+
+  let dots = "";
+  let xLabels = "";
+
+  points.forEach((pt, idx) => {
+    const dateStr = pt.scan.createdAt ? new Date(pt.scan.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : `#${idx + 1}`;
+    dots += `
+      <circle cx="${pt.x}" cy="${pt.y}" r="5" fill="#0284c7" stroke="#ffffff" stroke-width="2.5">
+        <title>${html(dateStr)} - Health: ${pt.health}%, Issues: ${pt.issues}</title>
+      </circle>
+      <text x="${pt.x}" y="${pt.y - 10}" font-size="10" font-weight="700" fill="#0369a1" text-anchor="middle" font-family="system-ui, sans-serif">${pt.health}%</text>
+    `;
+    xLabels += `
+      <text x="${pt.x}" y="${height - 12}" font-size="10" font-weight="600" fill="#64748b" text-anchor="middle" font-family="system-ui, sans-serif">${html(dateStr)}</text>
+    `;
+  });
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="healthSplineGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.35" />
+          <stop offset="100%" stop-color="#10b981" stop-opacity="0.03" />
+        </linearGradient>
+      </defs>
+      ${gridSvg}
+      <path d="${areaPath}" fill="url(#healthSplineGrad)" />
+      <path d="${curvePath}" fill="none" stroke="#0284c7" stroke-width="3" stroke-linecap="round" />
+      ${dots}
+      ${xLabels}
+    </svg>
+  `;
+}
+
 function renderSeverity(scan) {
   if (isScanPending(scan) && !hasReport(scan)) {
     elements.severityDistribution.innerHTML = `<div class="empty">Severity will appear after scan completion</div>`;
+    if (elements.overviewHistogram) elements.overviewHistogram.innerHTML = `<div class="empty">Histogram will appear after scan completion</div>`;
+    if (elements.overviewHeatmap) elements.overviewHeatmap.innerHTML = `<div class="empty">Heatmap will appear after scan completion</div>`;
     return;
   }
 
@@ -739,6 +977,26 @@ function renderSeverity(scan) {
       <span>${count}</span>
     `;
     elements.severityDistribution.append(row);
+  }
+
+  // Overview Histogram
+  if (elements.overviewHistogram) {
+    const histBuckets = [
+      { label: "Critical", value: counts.critical, color: "#ef4444" },
+      { label: "High", value: counts.high, color: "#f97316" },
+      { label: "Medium", value: counts.medium, color: "#f59e0b" },
+      { label: "Low", value: counts.low, color: "#10b981" },
+      { label: "Info", value: counts.info, color: "#3b82f6" }
+    ];
+    elements.overviewHistogram.innerHTML = renderHistogramSvg(histBuckets, 440, 180);
+  }
+
+  // Overview Seaborn Factor Heatmap
+  if (elements.overviewHeatmap) {
+    const factorsList = ["build", "test", "lint", "security", "secrets", "types", "dependencies", "runtime"];
+    elements.overviewHeatmap.innerHTML = scan
+      ? renderSeabornHeatmapSvg(factorsList, [scan], 440, 180)
+      : `<div class="empty">No scan selected</div>`;
   }
 }
 
@@ -948,10 +1206,63 @@ function renderTrends() {
   elements.trendList.innerHTML = "";
 
   if (scans.length === 0) {
+    if (elements.trendLineChart) elements.trendLineChart.innerHTML = `<div class="empty">No trend data yet. Run scans to see trajectory.</div>`;
+    if (elements.trendSeabornHeatmap) elements.trendSeabornHeatmap.innerHTML = `<div class="empty">No factor matrix data yet.</div>`;
+    if (elements.trendHistogram) elements.trendHistogram.innerHTML = `<div class="empty">No findings histogram data yet.</div>`;
+    if (elements.trendSummaryStats) elements.trendSummaryStats.innerHTML = "";
     elements.trendList.innerHTML = `<div class="empty">No trend data yet</div>`;
     return;
   }
 
+  // 1. Summary Stats
+  if (elements.trendSummaryStats) {
+    const healths = scans.map(s => getHealthPercent(s)).filter(h => h !== undefined);
+    const avgHealth = healths.length > 0 ? Math.round(healths.reduce((a, b) => a + b, 0) / healths.length) : "--";
+    const latestHealth = healths.length > 0 ? healths[healths.length - 1] : "--";
+    const firstHealth = healths.length > 0 ? healths[0] : 0;
+    const diff = typeof latestHealth === "number" && typeof firstHealth === "number" ? latestHealth - firstHealth : 0;
+    const diffText = diff > 0 ? `▲ +${diff}%` : (diff < 0 ? `▼ ${diff}%` : `▬ Stable`);
+    const diffColor = diff > 0 ? "#10b981" : (diff < 0 ? "#ef4444" : "#64748b");
+
+    elements.trendSummaryStats.innerHTML = `
+      <span class="stat-pill">Avg Health: <b>${avgHealth}%</b></span>
+      <span class="stat-pill">Latest: <b>${latestHealth}%</b></span>
+      <span class="stat-pill" style="color:${diffColor}">Trajectory: <b>${diffText}</b></span>
+      <span class="stat-pill">Scans Plotted: <b>${scans.length}</b></span>
+    `;
+  }
+
+  // 2. Trend Line & Spline Area Chart
+  if (elements.trendLineChart) {
+    elements.trendLineChart.innerHTML = renderTrendSplineSvg(scans, 640, 220);
+  }
+
+  // 3. Seaborn Heatmap Matrix
+  if (elements.trendSeabornHeatmap) {
+    const factorsList = ["build", "test", "lint", "security", "secrets", "types", "dependencies", "runtime"];
+    elements.trendSeabornHeatmap.innerHTML = renderSeabornHeatmapSvg(factorsList, scans.slice(-8), 540, 220);
+  }
+
+  // 4. Cumulative Findings Histogram
+  if (elements.trendHistogram) {
+    const cumulativeCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    for (const s of scans) {
+      for (const issue of getIssues(s)) {
+        const sev = severityClass(issue.severity);
+        if (sev in cumulativeCounts) cumulativeCounts[sev] += 1;
+      }
+    }
+    const histBuckets = [
+      { label: "Critical", value: cumulativeCounts.critical, color: "#ef4444" },
+      { label: "High", value: cumulativeCounts.high, color: "#f97316" },
+      { label: "Medium", value: cumulativeCounts.medium, color: "#f59e0b" },
+      { label: "Low", value: cumulativeCounts.low, color: "#10b981" },
+      { label: "Info", value: cumulativeCounts.info, color: "#3b82f6" }
+    ];
+    elements.trendHistogram.innerHTML = renderHistogramSvg(histBuckets, 440, 220);
+  }
+
+  // 5. Scan Log
   for (const scan of scans) {
     const health = getHealthPercent(scan);
     const issues = getIssues(scan).length;

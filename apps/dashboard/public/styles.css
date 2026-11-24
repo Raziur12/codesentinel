@@ -452,19 +452,34 @@ button:hover {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(330px, 380px) 1fr;
-  gap: 18px;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
   min-height: 560px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .side-stack {
   display: grid;
   gap: 14px;
   align-content: start;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.workspace {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .panel {
   padding: 18px;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .panel-header {
@@ -750,7 +765,7 @@ button:hover {
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }
@@ -844,7 +859,7 @@ button:hover {
 
 .split {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 18px;
 }
 
@@ -995,6 +1010,157 @@ button:hover {
 }
 
 /* ==========================================================================
+   Chart & Visualizations (Histogram, Seaborn Heatmaps, Spline Trend Charts)
+   ========================================================================== */
+
+.overview-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+  width: 100%;
+  min-width: 0;
+}
+
+.trends-grid-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+  width: 100%;
+  min-width: 0;
+}
+
+.chart-card {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.03);
+}
+
+.chart-card.full-width-chart {
+  margin-bottom: 16px;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.chart-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.chart-subtitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.chart-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chart-badge.seaborn-badge {
+  background: #e0f2fe;
+  color: #0284c7;
+}
+
+.trend-summary-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stat-pill b {
+  color: var(--accent-strong);
+}
+
+.chart-box {
+  width: 100%;
+  overflow-x: auto;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.chart-box svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
+.trend-history-section {
+  margin-top: 22px;
+}
+
+.trend-history-section h3 {
+  font-size: 14px;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+/* Seaborn Heatmap Legend */
+.heatmap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 6px 12px;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+/* ==========================================================================
    Page View Separation (Dedicated Page Positions per Sidebar Menu)
    ========================================================================== */
 
@@ -1004,6 +1170,11 @@ body[data-active-view="overview"] .toolbar {
 
 body[data-active-view="overview"] .side-stack {
   display: grid;
+  grid-column: 1;
+}
+
+body[data-active-view="overview"] .workspace {
+  grid-column: 2;
 }
 
 body:not([data-active-view="overview"]) .toolbar {
@@ -1019,7 +1190,9 @@ body:not([data-active-view="overview"]) .layout {
 }
 
 body:not([data-active-view="overview"]) .workspace {
-  width: 100%;
+  grid-column: 1 !important;
+  width: 100% !important;
+  min-width: 0;
 }
 
 .back-to-overview-btn {
@@ -1075,7 +1248,7 @@ body:not([data-active-view="overview"]) .workspace {
    Responsive Breakpoints
    ========================================================================== */
 
-@media (max-width: 1180px) {
+@media (max-width: 1220px) {
   .toolbar {
     grid-template-columns: 1fr;
   }
@@ -1085,7 +1258,12 @@ body:not([data-active-view="overview"]) .workspace {
   }
 
   .layout {
-    grid-template-columns: minmax(280px, 320px) 1fr;
+    grid-template-columns: 1fr !important;
+  }
+
+  body[data-active-view="overview"] .side-stack,
+  body[data-active-view="overview"] .workspace {
+    grid-column: 1 !important;
   }
 }
 
@@ -1284,6 +1462,11 @@ body:not([data-active-view="overview"]) .workspace {
   }
 
   .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-charts,
+  .trends-grid-charts {
     grid-template-columns: 1fr;
   }
 
