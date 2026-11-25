@@ -11,7 +11,9 @@ const state = {
   projects: JSON.parse(localStorage.getItem("codesentinel.projects") ?? "[]"),
   scans: JSON.parse(localStorage.getItem("codesentinel.scans") ?? "[]"),
   selectedProjectId: localStorage.getItem("codesentinel.selectedProjectId") ?? "",
-  selectedScanId: localStorage.getItem("codesentinel.selectedScanId")
+  selectedScanId: localStorage.getItem("codesentinel.selectedScanId"),
+  fixesFilter: "all",
+  fixesSearch: ""
 };
 
 const elements = {
@@ -63,6 +65,7 @@ const elements = {
   trendList: document.querySelector("#trend-list"),
   fixesLabel: document.querySelector("#fixes-label"),
   fixesList: document.querySelector("#fixes-list"),
+  fixesNavBadge: document.querySelector("#fixes-nav-badge"),
   sidebar: document.querySelector("#sidebar"),
   sidebarScrim: document.querySelector("#sidebar-scrim"),
   sidebarCloseBtn: document.querySelector("#sidebar-close-btn"),
@@ -498,6 +501,19 @@ function renderScanProgress(scan) {
   const issueCount = getIssues(scan).length;
   const startedAt = scan?.createdAt ? new Date(scan.createdAt).toLocaleString() : "--";
   const finishedAt = scan?.updatedAt && !isScanPending(scan) ? new Date(scan.updatedAt).toLocaleString() : "--";
+  const isComplete = !isScanPending(scan) && hasReport(scan);
+
+  const fixCta = isComplete && issueCount > 0 ? `
+    <div class="fix-cta-banner">
+      <div class="fix-cta-info">
+        <strong>⚡ ${issueCount} Issue${issueCount > 1 ? "s" : ""} Found with Fix Solutions &amp; Commands</strong>
+        <span>Detailed root cause, file/folder locations with line numbers, code snippets, and executable terminal commands.</span>
+      </div>
+      <button type="button" class="fix-cta-btn" data-jump-view="fixes">
+        View Solutions in Fixes Menu &rarr;
+      </button>
+    </div>
+  ` : "";
 
   elements.scanProgress.innerHTML = `
     <div class="progress-main">
@@ -518,7 +534,18 @@ function renderScanProgress(scan) {
       <span><b>Finished</b>${html(finishedAt)}</span>
       <span><b>Scan ID</b>${html(scan?.id ?? "--")}</span>
     </div>
+    ${fixCta}
   `;
+
+  if (elements.fixesNavBadge) {
+    if (isComplete && issueCount > 0) {
+      elements.fixesNavBadge.textContent = String(issueCount);
+      elements.fixesNavBadge.classList.remove("hidden");
+    } else {
+      elements.fixesNavBadge.textContent = "";
+      elements.fixesNavBadge.classList.add("hidden");
+    }
+  }
 }
 
 function renderFactors(scan) {
@@ -1253,12 +1280,219 @@ function renderTrends() {
   }
 }
 
+function cleanRelativePath(filePath, projectPath) {
+  if (!filePath) return "";
+  let p = String(filePath).replace(/\\/g, "/");
+  if (projectPath) {
+    const proj = String(projectPath).replace(/\\/g, "/").replace(/\/$/, "");
+    if (p.startsWith(proj)) {
+      p = p.slice(proj.length).replace(/^\//, "");
+    }
+  }
+  p = p.replace(/^uploads\/[^/]+\/workspace\//, "");
+  return p;
+}
+
+function parseIssueLocation(issue, scan) {
+  const report = getScanReport(scan);
+  const aiAnalysis = report?.aiRootCause?.analyses?.find(
+    a => a.findingId === issue.id || (a.code && a.code === issue.code) || (a.category === issue.category && a.title === issue.title)
+  );
+  const rawFile = issue.file || aiAnalysis?.location?.file || "";
+  const clean = cleanRelativePath(rawFile, scan?.projectPath);
+
+  let folder = "Project Root";
+  let fileName = clean || "Configuration / Project Level";
+
+  if (clean) {
+    const lastSlash = clean.lastIndexOf("/");
+    if (lastSlash !== -1) {
+      folder = clean.slice(0, lastSlash);
+      fileName = clean.slice(lastSlash + 1);
+    } else {
+      folder = "./ (root)";
+      fileName = clean;
+    }
+  }
+
+  const line = issue.line ?? aiAnalysis?.location?.line;
+  const col = issue.column ?? aiAnalysis?.location?.column;
+  const lineColText = line
+    ? `Line ${line}${col ? `, Col ${col}` : ""}`
+    : "Whole File / Environment";
+
+  return {
+    cleanPath: clean,
+    folder,
+    fileName,
+    line,
+    column: col,
+    lineColText
+  };
+}
+
+function getIssueWhyItHappened(issue, aiAnalysis) {
+  if (aiAnalysis?.whyItHappened?.text) {
+    return aiAnalysis.whyItHappened.text;
+  }
+  if (aiAnalysis?.rootCause?.text) {
+    return aiAnalysis.rootCause.text;
+  }
+
+  const cat = (issue.category || "").toLowerCase();
+  const code = (issue.code || "").toUpperCase();
+  const title = (issue.title || "").toLowerCase();
+
+  if (cat === "lint" || code.includes("LINT") || title.includes("lint")) {
+    return "Violates configured linter rules (syntax/formatting, unused variables, or bad practices). Linters enforce strict project conventions and code cleanliness.";
+  }
+  if (cat.includes("type") || code.startsWith("TS") || title.includes("typescript")) {
+    return "TypeScript type checking failed: variable types, missing properties, or invalid function signatures do not match the expected TypeScript compiler contracts.";
+  }
+  if (cat === "build" || title.includes("build") || title.includes("compil")) {
+    return "Compilation or packaging failed due to syntax errors, unresolved module imports, or broken asset paths preventing build output generation.";
+  }
+  if (cat === "test" || cat === "tests" || title.includes("test")) {
+    return "Automated test suite failed: test assertion expectations were not satisfied or runtime exceptions occurred during test execution.";
+  }
+  if (cat === "security" || cat === "secret" || cat === "secrets") {
+    return "Hardcoded credentials, API keys, passwords, or security vulnerabilities were detected in source files. Storing credentials directly in code risks repository credential leakage.";
+  }
+  if (cat === "dependencies" || cat === "dependency" || title.includes("vulnerab")) {
+    return "Vulnerabilities or deprecated packages found in project dependencies. Running outdated packages with known CVEs leaves the application exposed to security exploits.";
+  }
+  if (cat === "configuration" || cat === "config") {
+    return "Required configuration files or keys (e.g., package.json scripts, tsconfig, env vars) are missing, improperly formatted, or invalid.";
+  }
+
+  return issue.message || "Deterministic checks detected non-conformance with project assurance rules.";
+}
+
+function getIssueSolutionAndCommands(issue, aiAnalysis, fixSuggestion, validationResult, cleanPath) {
+  const cat = (issue.category || "").toLowerCase();
+  const code = (issue.code || "").toUpperCase();
+  const title = (issue.title || "").toLowerCase();
+  const msg = (issue.message || "").toLowerCase();
+  const validationCmd = validationResult?.command;
+
+  let solution = issue.suggestion || fixSuggestion?.suggestedAction || aiAnalysis?.howToFix?.text;
+  let fixCmd = "";
+  let verifyCmd = validationCmd || "";
+
+  if (cat === "lint" || title.includes("lint")) {
+    if (!solution) solution = "Run linter with auto-fix enabled to automatically resolve formatting and fixable lint issues, or adjust the code manually to satisfy lint rules.";
+    fixCmd = cleanPath ? `npx eslint "${cleanPath}" --fix` : "npm run lint -- --fix";
+    if (!verifyCmd) verifyCmd = "npm run lint";
+  } else if (cat.includes("type") || code.startsWith("TS") || title.includes("typescript")) {
+    if (!solution) solution = "Update types, interfaces, or type annotations so the code matches the expected types, or install missing type definitions (@types/*).";
+    if (msg.includes("cannot find module") || msg.includes("could not find a declaration")) {
+      const match = issue.message.match(/['"](@?[a-z0-9_-]+(?:\/[a-z0-9_-]+)?)['"]/i);
+      const pkg = match ? match[1] : "";
+      fixCmd = pkg ? `npm install --save-dev @types/${pkg}` : "npx tsc --noEmit";
+    } else {
+      fixCmd = "npx tsc --noEmit";
+    }
+    if (!verifyCmd) verifyCmd = "npx tsc --noEmit";
+  } else if (cat === "dependencies" || cat === "dependency" || title.includes("vulnerab")) {
+    if (!solution) solution = "Run npm audit fix to automatically upgrade vulnerable dependencies to safe patched versions without breaking changes.";
+    fixCmd = "npm audit fix";
+    if (!verifyCmd) verifyCmd = "npm audit";
+  } else if (cat === "security" || cat === "secret" || cat === "secrets") {
+    if (!solution) solution = "Extract secrets/credentials into environment variables (.env), add .env to .gitignore, and access them using process.env.";
+    fixCmd = cleanPath ? `git rm --cached "${cleanPath}"` : "# Move credentials to .env file";
+    if (!verifyCmd) verifyCmd = validationCmd || "npm test";
+  } else if (cat === "test" || cat === "tests" || title.includes("test")) {
+    if (!solution) solution = "Inspect the test failure stack trace, fix the failing logic in the implementation file, or update obsolete test assertions.";
+    fixCmd = cleanPath ? `npm test -- "${cleanPath}"` : "npm test";
+    if (!verifyCmd) verifyCmd = "npm test";
+  } else if (cat === "build" || title.includes("build")) {
+    if (!solution) solution = "Resolve syntax errors, missing exports, or circular imports so the bundler/compiler can build without errors.";
+    fixCmd = "npm run build";
+    if (!verifyCmd) verifyCmd = "npm run build";
+  } else {
+    if (!solution) solution = "Review the error details and follow the recommended pattern to resolve this validation check.";
+    fixCmd = validationCmd || "npm test";
+  }
+
+  return { solution, fixCmd, verifyCmd };
+}
+
+function getIssueCodeSnippet(issue, aiAnalysis, fixSuggestion) {
+  if (fixSuggestion?.diffPreview) {
+    return `
+      <div class="fix-code-box">
+        <div class="fix-code-header">
+          <span>Suggested Code Diff (Patch)</span>
+          <small>Diff Preview</small>
+        </div>
+        <pre class="fix-diff-preview"><code>${html(fixSuggestion.diffPreview)}</code></pre>
+      </div>
+    `;
+  }
+
+  const evidence = issue.evidence || (aiAnalysis?.evidence && aiAnalysis.evidence.join("\n"));
+  if (evidence && String(evidence).trim().length > 0) {
+    return `
+      <div class="fix-code-box">
+        <div class="fix-code-header">
+          <span>Offending Code / Evidence${issue.line ? ` (Line ${issue.line})` : ""}</span>
+          <small>Source</small>
+        </div>
+        <pre class="fix-code-preview"><code>${html(String(evidence).trim())}</code></pre>
+      </div>
+    `;
+  }
+
+  if (issue.message && issue.message.length > 0 && issue.message.includes("\n")) {
+    return `
+      <div class="fix-code-box">
+        <div class="fix-code-header">
+          <span>Error Output / Trace</span>
+        </div>
+        <pre class="fix-code-preview"><code>${html(issue.message.trim())}</code></pre>
+      </div>
+    `;
+  }
+
+  return "";
+}
+
+function applyFixesFilter() {
+  const cards = document.querySelectorAll(".fix-card");
+  const filter = state.fixesFilter || "all";
+  const search = (state.fixesSearch || "").toLowerCase();
+
+  let visibleCount = 0;
+  cards.forEach(card => {
+    const severity = card.dataset.severity || "";
+    const category = (card.dataset.category || "").toLowerCase();
+    const text = card.textContent.toLowerCase();
+
+    let matchesFilter = true;
+    if (filter === "critical-high") {
+      matchesFilter = ["critical", "high"].includes(severity);
+    } else if (filter === "warnings") {
+      matchesFilter = ["medium", "low", "info", "warning"].includes(severity);
+    } else if (filter !== "all") {
+      matchesFilter = category === filter.toLowerCase();
+    }
+
+    const matchesSearch = !search || text.includes(search);
+    const visible = matchesFilter && matchesSearch;
+    card.style.display = visible ? "flex" : "none";
+    if (visible) visibleCount++;
+  });
+
+  const emptyMsg = document.querySelector("#fixes-empty-filter");
+  if (emptyMsg) {
+    emptyMsg.classList.toggle("hidden", visibleCount > 0);
+  }
+}
+
 /**
  * "Fixes" panel: once a scan's report is ready (100%), lists every
- * active finding/warning with the fix it needs and the exact command
- * that re-validates that category, so the two views stay honest with
- * each other - this never fabricates a command, it reads the same
- * validation.results[].command every other panel reads.
+ * active finding/warning with its root cause, folder, file, line number,
+ * code snippet, actionable solution, and executable terminal fix commands.
  */
 function renderFixesPanel(scan) {
   if (isScanPending(scan) && !hasReport(scan)) {
@@ -1277,43 +1511,170 @@ function renderFixesPanel(scan) {
   elements.fixesLabel.textContent = `${issues.length} fix(es) needed`;
 
   if (issues.length === 0) {
-    elements.fixesList.innerHTML = `<div class="empty">No active findings - nothing to fix.</div>`;
+    elements.fixesList.innerHTML = `
+      <div class="fix-clean-card">
+        <div class="fix-clean-icon">🎉</div>
+        <h3>All Checks Passed — No Fixes Required</h3>
+        <p>Your codebase conforms to all configured assurance, security, build, test, and style policies. Zero active findings detected.</p>
+      </div>
+    `;
     return;
   }
 
-  const rows = issues.map(issue => {
-    const validationResult = getValidationResult(scan, issue.category);
-    const command = validationResult?.command;
-    const location = issue.file
-      ? `${issue.file}${issue.line ? `:${issue.line}` : ""}${issue.column ? `:${issue.column}` : ""}`
-      : "--";
+  const report = getScanReport(scan);
+  const categories = [...new Set(issues.map(i => i.category).filter(Boolean))];
 
+  const processedIssues = issues.map(issue => {
+    const aiAnalysis = report?.aiRootCause?.analyses?.find(
+      a => a.findingId === issue.id || (a.code && a.code === issue.code) || (a.category === issue.category && a.title === issue.title)
+    );
+    const fixSuggestion = report?.aiFixSuggestions?.suggestions?.find(
+      f => f.findingId === issue.id || (f.code && f.code === issue.code) || (f.category === issue.category && f.title === issue.title)
+    );
+    const validationResult = getValidationResult(scan, issue.category);
+    const location = parseIssueLocation(issue, scan);
+    const whyItHappened = getIssueWhyItHappened(issue, aiAnalysis);
+    const { solution, fixCmd, verifyCmd } = getIssueSolutionAndCommands(
+      issue,
+      aiAnalysis,
+      fixSuggestion,
+      validationResult,
+      location.cleanPath
+    );
+    const codeSnippet = getIssueCodeSnippet(issue, aiAnalysis, fixSuggestion);
+
+    return {
+      issue,
+      aiAnalysis,
+      fixSuggestion,
+      validationResult,
+      location,
+      whyItHappened,
+      solution,
+      fixCmd,
+      verifyCmd,
+      codeSnippet
+    };
+  });
+
+  const uniqueFixCommands = [...new Set(processedIssues.map(p => p.fixCmd).filter(Boolean))];
+  const compoundFixCommand = uniqueFixCommands.join(" && ");
+
+  const filterButtons = `
+    <button type="button" class="fix-filter-btn ${state.fixesFilter === "all" ? "active" : ""}" data-filter="all">All (${issues.length})</button>
+    <button type="button" class="fix-filter-btn ${state.fixesFilter === "critical-high" ? "active" : ""}" data-filter="critical-high">Critical &amp; High</button>
+    <button type="button" class="fix-filter-btn ${state.fixesFilter === "warnings" ? "active" : ""}" data-filter="warnings">Medium &amp; Warnings</button>
+    ${categories.map(cat => `
+      <button type="button" class="fix-filter-btn ${state.fixesFilter === cat ? "active" : ""}" data-filter="${html(cat)}">${html(cat)}</button>
+    `).join("")}
+  `;
+
+  const cardsHtml = processedIssues.map(({ issue, location, whyItHappened, solution, fixCmd, verifyCmd, codeSnippet }) => {
     return `
-      <tr>
-        <td><strong class="severity-${severityClass(issue.severity)}">${html(issue.severity)}</strong></td>
-        <td class="loc">${html(location)}</td>
-        <td>
-          <strong>${html(issue.title)}</strong>
-          <div>${html(issue.suggestion ?? issue.message)}</div>
-        </td>
-        <td class="cause">${command ? html(command) : "No re-run command for this check"}</td>
-      </tr>
+      <div class="fix-card severity-${severityClass(issue.severity)}" data-severity="${severityClass(issue.severity)}" data-category="${html(issue.category)}">
+        <div class="fix-card-header">
+          <div class="fix-card-badges">
+            <span class="fix-badge severity-${severityClass(issue.severity)}">${html(issue.severity.toUpperCase())}</span>
+            <span class="fix-badge category-badge">${html(issue.category)}</span>
+            ${issue.code ? `<span class="fix-badge code-badge">${html(issue.code)}</span>` : ""}
+          </div>
+          <div class="fix-card-title-group">
+            <h3 class="fix-card-title">${html(issue.title)}</h3>
+            ${issue.source ? `<span class="fix-source">Detected by: <b>${html(issue.source)}</b></span>` : ""}
+          </div>
+        </div>
+
+        <div class="fix-section fix-location-section">
+          <div class="fix-section-title">
+            <span class="fix-icon">📁</span>
+            <strong>File &amp; Folder Location</strong>
+          </div>
+          <div class="fix-location-details">
+            <div class="fix-loc-item">
+              <span class="fix-loc-label">Folder</span>
+              <code class="fix-loc-val">${html(location.folder)}</code>
+            </div>
+            <div class="fix-loc-item">
+              <span class="fix-loc-label">File Name</span>
+              <code class="fix-loc-val file-name">${html(location.fileName)}</code>
+            </div>
+            <div class="fix-loc-item">
+              <span class="fix-loc-label">Position</span>
+              <code class="fix-loc-val line-number">${html(location.lineColText)}</code>
+            </div>
+          </div>
+          ${codeSnippet}
+        </div>
+
+        <div class="fix-section fix-reason-section">
+          <div class="fix-section-title">
+            <span class="fix-icon">❓</span>
+            <strong>Why This Occurred (Reason / Kyun Aaya)</strong>
+          </div>
+          <div class="fix-reason-text">${html(whyItHappened)}</div>
+          ${issue.message && issue.message !== issue.title ? `
+            <div class="fix-raw-message"><small>Error Details:</small> <code>${html(issue.message)}</code></div>
+          ` : ""}
+        </div>
+
+        <div class="fix-section fix-solution-section">
+          <div class="fix-section-title">
+            <span class="fix-icon">💡</span>
+            <strong>Solution &amp; Fix Steps</strong>
+          </div>
+          <div class="fix-solution-text">${html(solution)}</div>
+
+          ${fixCmd ? `
+            <div class="fix-command-box">
+              <div class="fix-cmd-header">
+                <span class="cmd-label">⚡ Run in Terminal to Fix:</span>
+                <button type="button" class="copy-cmd-btn" data-clipboard-text="${html(fixCmd)}">
+                  <span class="copy-icon">📋</span> Copy Command
+                </button>
+              </div>
+              <pre class="fix-cmd-code"><code>${html(fixCmd)}</code></pre>
+            </div>
+          ` : ""}
+
+          ${verifyCmd ? `
+            <div class="fix-verify-box">
+              <div class="fix-cmd-header">
+                <span class="cmd-label">✅ Re-Verify After Fix:</span>
+                <button type="button" class="copy-cmd-btn" data-clipboard-text="${html(verifyCmd)}">
+                  <span class="copy-icon">📋</span> Copy Verify
+                </button>
+              </div>
+              <pre class="fix-cmd-code verify-code"><code>${html(verifyCmd)}</code></pre>
+            </div>
+          ` : ""}
+        </div>
+      </div>
     `;
   }).join("");
 
   elements.fixesList.innerHTML = `
-    <table class="factor-table">
-      <thead>
-        <tr>
-          <th>Severity</th>
-          <th>Location</th>
-          <th>Fix Needed</th>
-          <th>Run After Fixing</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
+    <div class="fixes-toolbar">
+      <div class="fixes-toolbar-top">
+        <div class="fixes-filters">
+          ${filterButtons}
+        </div>
+        ${compoundFixCommand ? `
+          <button type="button" class="copy-cmd-btn copy-all-btn" data-clipboard-text="${html(compoundFixCommand)}">
+            <span class="copy-icon">📋</span> Copy All Fix Commands
+          </button>
+        ` : ""}
+      </div>
+      <div class="fixes-search-box">
+        <input type="text" id="fixes-search-input" placeholder="Search by file name, error code, or keyword..." value="${html(state.fixesSearch)}" />
+      </div>
+    </div>
+    <div class="fixes-cards-container">
+      ${cardsHtml}
+      <div id="fixes-empty-filter" class="empty hidden">No issues match the selected filter or search term.</div>
+    </div>
   `;
+
+  applyFixesFilter();
 }
 
 function getSelectedScan() {
@@ -1856,6 +2217,71 @@ for (const btn of document.querySelectorAll("[data-jump-view]")) {
   btn.addEventListener("click", () => {
     switchView(btn.dataset.jumpView);
   });
+}
+
+// Delegated click handler for dynamically rendered jump buttons, copy buttons, and filters
+document.addEventListener("click", event => {
+  const jumpBtn = event.target.closest("[data-jump-view]");
+  if (jumpBtn) {
+    switchView(jumpBtn.dataset.jumpView);
+    return;
+  }
+
+  const copyBtn = event.target.closest(".copy-cmd-btn");
+  if (copyBtn) {
+    const text = copyBtn.dataset.clipboardText;
+    if (text) {
+      const showFeedback = () => {
+        const original = copyBtn.innerHTML;
+        copyBtn.innerHTML = `<span class="copy-icon">✓</span> Copied!`;
+        copyBtn.classList.add("copied");
+        setTimeout(() => {
+          copyBtn.innerHTML = original;
+          copyBtn.classList.remove("copied");
+        }, 2000);
+      };
+
+      if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(showFeedback).catch(() => {
+          fallbackCopy(text);
+          showFeedback();
+        });
+      } else {
+        fallbackCopy(text);
+        showFeedback();
+      }
+    }
+    return;
+  }
+
+  const filterBtn = event.target.closest(".fix-filter-btn");
+  if (filterBtn) {
+    state.fixesFilter = filterBtn.dataset.filter || "all";
+    document.querySelectorAll(".fix-filter-btn").forEach(b => b.classList.toggle("active", b === filterBtn));
+    applyFixesFilter();
+    return;
+  }
+});
+
+document.addEventListener("input", event => {
+  if (event.target.id === "fixes-search-input") {
+    state.fixesSearch = event.target.value;
+    applyFixesFilter();
+  }
+});
+
+function fallbackCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand("copy");
+  } finally {
+    document.body.removeChild(ta);
+  }
 }
 
 switchView("overview");
