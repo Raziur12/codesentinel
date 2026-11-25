@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   sanitizeGitRef,
   validateGithubRepositoryUrl
-} from "./index.js";
+} from "./github-url.js";
 
 test(
   "accepts a plain github.com owner/repo URL",

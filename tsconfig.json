@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "apps/api/src/**/*",
+    "apps/scanner/src/**/*",
+    "packages/scanner-core/src/**/*",
+    "packages/project-analyzer/src/**/*",
+    "packages/technology-detectors/src/**/*",
+    "packages/validation-engine/src/**/*",
+    "packages/database/src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/dist",
+    ".codesentinel",
+    ".codesentinel-api"
+  ]
+}

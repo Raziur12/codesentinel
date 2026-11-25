@@ -2947,12 +2947,11 @@ function parseTypeScriptErrors(
 function parseEngineWarning(
   output: string
 ): ParsedEngineWarning | null {
-  if (
-    !output.includes("EBADENGINE") &&
-    !output
-      .toLowerCase()
-      .includes("unsupported engine")
-  ) {
+  const hasEngineSignal =
+    /(?:npm\s+warn(?:ing)?|npm\s+error|code)\s+EBADENGINE/i.test(output) ||
+    output.toLowerCase().includes("unsupported engine");
+
+  if (!hasEngineSignal) {
     return null;
   }
 
